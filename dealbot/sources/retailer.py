@@ -37,13 +37,22 @@ class RetailerSource(Source):
 
     async def search(self, kind: Kind) -> list[Candidate]:
         queries = self.cfg.ram_queries if kind == "ram" else (self.cfg.gpu_query,)
-        urls: list[str] = []
-        for query in queries:
+        # One shared budget for both search-page and detail-page requests to this
+        # store, so parallelizing the per-speed RAM search doesn't raise the total
+        # number of simultaneous requests a store sees beyond STORE_CONCURRENCY.
+        limiter = asyncio.Semaphore(self.cfg.store_concurrency)
+
+        async def collect(query: str) -> list[str]:
             search_url = self.store.search_url.format(query=quote_plus(query))
-            for found in await self._collect_links(search_url):
+            async with limiter:
+                return await self._collect_links(search_url)
+
+        batches = await asyncio.gather(*(collect(q) for q in queries))
+        urls: list[str] = []
+        for batch in batches:
+            for found in batch:
                 if found not in urls:
                     urls.append(found)
-        limiter = asyncio.Semaphore(self.cfg.store_concurrency)
 
         async def one(product_url: str) -> Candidate | None:
             try:

@@ -55,8 +55,8 @@ class EbaySource(Source):
         category = self.cfg.ebay_ram_category_id if kind == "ram" else self.cfg.ebay_gpu_category_id
         ceiling = self.cfg.ram_max_price if kind == "ram" else self.cfg.gpu_max_price
         headers = await self._headers()
-        seen: dict[str, Candidate] = {}
-        for query in queries:
+
+        async def one_query(query: str) -> list[Candidate]:
             response = await self.client.get(
                 "https://api.ebay.com/buy/browse/v1/item_summary/search",
                 headers=headers,
@@ -67,9 +67,10 @@ class EbaySource(Source):
                 },
             )
             response.raise_for_status()
+            out: list[Candidate] = []
             for item in response.json().get("itemSummaries", []):
                 item_id = str(item.get("itemId", ""))
-                if not item_id or item_id in seen:
+                if not item_id:
                     continue
                 price = money(item.get("price"))
                 if price is None:
@@ -81,14 +82,23 @@ class EbaySource(Source):
                     continue
                 shipping_options = item.get("shippingOptions") or []
                 shipping = money(shipping_options[0].get("shippingCost")) if shipping_options else None
-                seen[item_id] = Candidate(
+                out.append(Candidate(
                     source=self.name, source_id=item_id, kind=kind,
                     title=str(item.get("title", "")), url=str(item.get("itemWebUrl", "")), price=price,
                     shipping=shipping, condition=str(item.get("condition", "unknown")), stock="in stock",
                     category_id=str(item.get("categoryId", category)), category_name=str((item.get("categories") or [{}])[0].get("categoryName", "")),
                     seller_feedback_score=feedback_score, seller_feedback_percent=feedback_pct, source_confidence=95,
                     metadata={"listing_type": "fixed price", "sku": item.get("legacyItemId", ""), "image": (item.get("image") or {}).get("imageUrl", "")},
-                )
+                ))
+            return out
+
+        # Every speed tier is an independent API call, so run them concurrently
+        # instead of paying N sequential round-trips for an N-speed RAM search.
+        batches = await asyncio.gather(*(one_query(q) for q in queries))
+        seen: dict[str, Candidate] = {}
+        for batch in batches:
+            for candidate in batch:
+                seen.setdefault(candidate.source_id, candidate)
         return list(seen.values())
 
     async def get_item(self, item_id: str, kind: Kind) -> Candidate | None:

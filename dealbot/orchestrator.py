@@ -147,18 +147,33 @@ class Engine:
         return deal
 
     async def _watch_loop(self) -> None:
+        limiter = asyncio.Semaphore(self.cfg.store_concurrency)
         while True:
             api_counts = defaultdict(int)
-            alert_counts = defaultdict(int)
+            rows = []
             for row in await self.storage.due_watchlist():
                 if row["source"] in {"eBay", "Best Buy"}:
                     if api_counts[row["source"]] >= self.cfg.api_watch_batch_size: continue
                     api_counts[row["source"]] += 1
+                rows.append(row)
+
+            async def verify(row: dict[str, str]) -> Candidate | None:
+                async with limiter:
+                    try:
+                        return await self._verify_watch_row(row)
+                    except Exception:
+                        return None
+
+            # Verifying due rows is the slow, network-bound part; run them
+            # concurrently instead of one at a time. Alerting stays sequential
+            # afterward so max_alerts_per_kind_scan is still enforced exactly.
+            candidates = await asyncio.gather(*(verify(row) for row in rows))
+            alert_counts = defaultdict(int)
+            for c in candidates:
+                if not c: continue
                 try:
-                    c = await self._verify_watch_row(row)
-                    if c:
-                        deal = await self.process(c, emit=alert_counts[c.kind] < self.cfg.max_alerts_per_kind_scan)
-                        if deal: alert_counts[c.kind] += 1
+                    deal = await self.process(c, emit=alert_counts[c.kind] < self.cfg.max_alerts_per_kind_scan)
+                    if deal: alert_counts[c.kind] += 1
                 except Exception: pass
             await asyncio.sleep(self.cfg.watchlist_interval_seconds)
 
