@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import re
 
-from playwright.async_api import Browser, Playwright, async_playwright
+from playwright.async_api import Browser, Playwright, Error as PlaywrightError, async_playwright
 
-from .sources.base import BlockedSource
+from .sources.base import BlockedSource, SourceError
 
 CHALLENGE_RE = re.compile(r"access denied|verify you are human|captcha", re.I)
 
@@ -44,8 +44,13 @@ class BrowserManager:
         context = await self._browser.new_context()
         try:
             page = await context.new_page()
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
-            html = await page.content()
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
+                html = await page.content()
+            except PlaywrightError as exc:
+                # A slow/unreachable page (timeout, navigation failure, etc.) should
+                # only fail this one fetch, not blow up the whole store's scan.
+                raise SourceError(f"browser fetch failed: {exc}") from exc
             if (response and response.status in {403, 429}) or CHALLENGE_RE.search(html):
                 raise BlockedSource("browser was challenged; respecting a 30–60 minute cooldown")
             return html

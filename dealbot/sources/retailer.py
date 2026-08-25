@@ -44,8 +44,11 @@ class RetailerSource(Source):
 
         async def collect(query: str) -> list[str]:
             search_url = self.store.search_url.format(query=quote_plus(query))
-            async with limiter:
-                return await self._collect_links(search_url)
+            try:
+                async with limiter:
+                    return await self._collect_links(search_url)
+            except (SourceError, httpx.HTTPError):
+                return []
 
         batches = await asyncio.gather(*(collect(q) for q in queries))
         urls: list[str] = []
