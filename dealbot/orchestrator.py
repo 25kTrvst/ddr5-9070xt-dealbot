@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .browser import BrowserManager
 from .classification import classify
 from .config import Config, STORES
 from .models import Candidate, Deal, Kind
@@ -20,35 +21,67 @@ from .sources.ebay import EbaySource
 from .sources.retailer import RetailerSource
 from .storage import Storage
 
+CRASH_RESTART_DELAY_SECONDS = 30
+
 
 class Engine:
-    def __init__(self, cfg: Config, on_deal):
-        self.cfg, self.on_deal = cfg, on_deal
+    def __init__(self, cfg: Config, on_deal, on_crash=None):
+        self.cfg, self.on_deal, self.on_crash = cfg, on_deal, on_crash
         self.client = httpx.AsyncClient(timeout=cfg.http_timeout_seconds, follow_redirects=True)
         self.storage = Storage(cfg.database_path)
+        self.browser = BrowserManager()
         self.ebay = EbaySource(cfg, self.client); self.bestbuy = BestBuySource(cfg, self.client)
-        self.retailers = [RetailerSource(cfg, s, self.client) for s in STORES]
+        self.retailers = [RetailerSource(cfg, s, self.client, self.browser) for s in STORES]
         self.discovery = [RedditDiscovery(cfg, self.client), SlickdealsDiscovery(cfg), ZohoDiscovery(cfg)]
         self.tasks: list[asyncio.Task] = []; self._locks = defaultdict(lambda: asyncio.Semaphore(cfg.store_concurrency))
         self._blocked_until: dict[str, datetime] = {}; self.last_scans: dict[str, str] = {}
 
     async def start(self) -> None:
         await self.storage.initialize()
+        await self.browser.start()
         self.tasks.extend([
-            asyncio.create_task(self._source_loop(self.ebay, self.cfg.ebay_interval_seconds), name="ebay-fast"),
-            asyncio.create_task(self._source_loop(self.bestbuy, self.cfg.bestbuy_interval_seconds, initial_delay=20), name="bestbuy-fast"),
-            asyncio.create_task(self._watch_loop(), name="sku-watchlist"),
+            self._spawn(lambda: self._source_loop(self.ebay, self.cfg.ebay_interval_seconds), "ebay-fast"),
+            self._spawn(lambda: self._source_loop(self.bestbuy, self.cfg.bestbuy_interval_seconds, initial_delay=20), "bestbuy-fast"),
+            self._spawn(self._watch_loop, "sku-watchlist"),
         ])
         for d in self.discovery:
             interval = self.cfg.reddit_interval_seconds if isinstance(d, RedditDiscovery) else self.cfg.slickdeals_interval_seconds if isinstance(d, SlickdealsDiscovery) else self.cfg.email_interval_seconds
-            self.tasks.append(asyncio.create_task(self._discovery_loop(d, interval), name=f"{d.name}-discovery"))
+            self.tasks.append(self._spawn(lambda d=d, interval=interval: self._discovery_loop(d, interval), f"{d.name}-discovery"))
         for index, source in enumerate(self.retailers):
             offset = index * self.cfg.slow_interval_seconds / max(1, len(self.retailers))
-            self.tasks.append(asyncio.create_task(self._source_loop(source, self.cfg.slow_interval_seconds, jitter=180, initial_delay=offset), name=f"{source.name}-broad"))
+            self.tasks.append(self._spawn(
+                lambda source=source, offset=offset: self._source_loop(source, self.cfg.slow_interval_seconds, jitter=180, initial_delay=offset),
+                f"{source.name}-broad",
+            ))
+
+    def _spawn(self, factory, name: str) -> asyncio.Task:
+        return asyncio.create_task(self._supervised(factory, name), name=name)
+
+    async def _supervised(self, factory, name: str) -> None:
+        """Every background scanner runs forever by design; if one still dies
+        from an unhandled bug, this notices, logs it, tells the operator, and
+        restarts it — a scanner can never silently stop."""
+        while True:
+            try:
+                await factory()
+                exc: Exception = RuntimeError("loop exited without raising")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - deliberately broad: this is the last-resort safety net
+                exc = e
+            await self.storage.set_health(name, "crashed", f"{type(exc).__name__}: {exc}; restarting in {CRASH_RESTART_DELAY_SECONDS}s")
+            if self.on_crash:
+                try:
+                    await self.on_crash(name, exc)
+                except Exception:
+                    pass
+            await asyncio.sleep(CRASH_RESTART_DELAY_SECONDS)
 
     async def stop(self) -> None:
         for t in self.tasks: t.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True); await self.client.aclose()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        await self.client.aclose()
+        await self.browser.stop()
 
     async def _source_loop(self, source, interval: int, jitter: int = 10, initial_delay: float = 0) -> None:
         await asyncio.sleep(initial_delay + random.uniform(0, min(15, interval / 4)))
@@ -90,15 +123,23 @@ class Engine:
         if not cl.accepted or cl.confidence < self.cfg.minimum_identity_confidence: return None
         if c.price > limit: return None
         observations, previous, low, should_alert = await self.storage.record(c, cl, self.cfg.watchlist_interval_seconds)
+        unconfirmed = False
         if c.price < limit * self.cfg.unusual_price_ratio:
             matches = await self.storage.corroborating_sources(c.kind, cl.model_key, c.price, self.cfg.corroboration_tolerance_percent, c.source)
             if matches < 1 and int(c.metadata.get("price_verification_count", 1)) < 2:
-                await self.storage.set_health(c.source, "quarantine", f"unusually cheap {cl.model_key}; requires two matching price surfaces")
-                return None
+                # Unusually cheap and not yet corroborated by a second price surface.
+                # Still surface it as a clearly-flagged warning instead of hiding it.
+                unconfirmed = True
+                await self.storage.set_health(c.source, "quarantine", f"unusually cheap {cl.model_key}; alerted as UNCONFIRMED pending a second price surface")
         if not should_alert: return None
         sold = await self.storage.sold_prices(cl.model_key, self.cfg.sold_comps_file)
-        deal = make_deal(c, cl, self.cfg, observations, previous, low, sold)
-        if deal.recommendation == "WAIT / WATCH":
+        baseline, low_all, sample_count = await self.storage.market_baseline(c.kind, cl.model_key)
+        deal = make_deal(c, cl, self.cfg, observations, previous, low, sold, baseline, low_all, sample_count)
+        if unconfirmed:
+            deal.unconfirmed = True
+            deal.recommendation = "UNCONFIRMED — VERIFY BEFORE BUYING"
+            deal.recommendation_reason = "Price is far below the normal range and has only been seen once on one source. " + deal.recommendation_reason
+        elif deal.recommendation == "WAIT / WATCH":
             return None
         if not emit:
             return None

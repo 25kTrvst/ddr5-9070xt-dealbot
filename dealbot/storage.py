@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 
 import aiosqlite
 
@@ -33,6 +34,7 @@ class Storage:
               source TEXT PRIMARY KEY, state TEXT, detail TEXT, blocked_until TEXT, updated_at TEXT);
             CREATE INDEX IF NOT EXISTS idx_obs_item ON observations(source, source_id, observed_at);
             CREATE INDEX IF NOT EXISTS idx_watch_due ON watchlist(next_check);
+            CREATE INDEX IF NOT EXISTS idx_listings_model ON listings(kind, model_key);
             """)
             await db.commit()
 
@@ -105,6 +107,25 @@ class Storage:
               WHERE kind=? AND model_key=? AND source<>? AND last_price BETWEEN ? AND ? AND last_seen>=?""",
               (kind,model_key,exclude_source,lo,hi,since))
             return int((await cur.fetchone())[0])
+
+    async def market_baseline(self, kind: str, model_key: str, days: int = 30) -> tuple[float | None, float | None, int]:
+        """Genuine cross-store market baseline and 30-day low for the exact
+        model, built from every store/source that has ever verified it —
+        not just the single listing being evaluated."""
+        if not model_key:
+            return None, None, 0
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                """SELECT o.price FROM observations o
+                   JOIN listings l ON o.source=l.source AND o.source_id=l.source_id
+                   WHERE l.kind=? AND l.model_key=? AND o.observed_at>=?""",
+                (kind, model_key, since),
+            )
+            prices = [row[0] for row in await cur.fetchall()]
+        if not prices:
+            return None, None, 0
+        return round(median(prices), 2), round(min(prices), 2), len(prices)
 
     async def health(self) -> list[dict[str, str]]:
         async with aiosqlite.connect(self.path) as db:

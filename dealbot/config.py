@@ -37,13 +37,26 @@ def env_float(name: str, default: float, minimum: float | None = None) -> float:
     return value
 
 
+def env_int_list(name: str, default: list[int]) -> list[int]:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    out: list[int] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if piece:
+            try:
+                out.append(int(piece))
+            except ValueError:
+                continue
+    return out or default
+
+
 @dataclass(slots=True)
 class StoreConfig:
     name: str
     search_url: str
     domains: tuple[str, ...]
-    product_markers: tuple[str, ...]
-    price_selectors: tuple[str, ...]
 
 
 @dataclass(slots=True)
@@ -52,9 +65,13 @@ class Config:
     ping_user_id: int = field(default_factory=lambda: env_int("PING_USER_ID", 0, 0))
     ram_channel_name: str = field(default_factory=lambda: os.getenv("RAM_CHANNEL_NAME", "ddr5").strip().lower())
     gpu_channel_name: str = field(default_factory=lambda: os.getenv("GPU_CHANNEL_NAME", "gpu").strip().lower())
+    ops_channel_name: str = field(default_factory=lambda: os.getenv("OPS_CHANNEL_NAME", "dealbot-ops").strip().lower())
 
     ram_query: str = field(default_factory=lambda: os.getenv("RAM_QUERY", "32GB DDR5 desktop memory 6000MHz"))
     gpu_query: str = field(default_factory=lambda: os.getenv("GPU_QUERY", "RX 9070 XT graphics card"))
+    ram_speeds: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_SPEEDS", [5000, 5200, 5600, 6000, 6400])))
+    ram_query_template: str = field(default_factory=lambda: os.getenv("RAM_QUERY_TEMPLATE", "32GB DDR5 desktop memory {speed}MHz"))
+    ram_queries: tuple[str, ...] = field(default_factory=tuple)
     ram_max_price: float = field(default_factory=lambda: env_float("RAM_MAX_PRICE", 200, 1))
     ram_hot_price: float = field(default_factory=lambda: env_float("RAM_HOT_PRICE", 150, 1))
     ram_insane_price: float = field(default_factory=lambda: env_float("RAM_INSANE_PRICE", 120, 1))
@@ -129,6 +146,11 @@ class Config:
         6400: env_float("RAM_RESALE_REFERENCE_6400", 225, 1),
     })
 
+    def __post_init__(self) -> None:
+        speeds = tuple(s for s in sorted(set(self.ram_speeds)) if s >= self.ram_min_speed) or (self.ram_min_speed,)
+        self.ram_speeds = speeds
+        self.ram_queries = tuple(self.ram_query_template.format(speed=s) for s in speeds)
+
     def validate(self) -> list[str]:
         issues: list[str] = []
         if not self.discord_token:
@@ -149,49 +171,35 @@ STORES: tuple[StoreConfig, ...] = (
         "Newegg",
         "https://www.newegg.com/p/pl?d={query}",
         ("newegg.com", "www.newegg.com"),
-        ("/p/",),
-        ("#ProductBuy .price-current", ".product-buy .price-current", ".product-price .price-current"),
     ),
     StoreConfig(
         "Best Buy page",
         "https://www.bestbuy.com/site/searchpage.jsp?st={query}",
         ("bestbuy.com", "www.bestbuy.com"),
-        ("skuId=",),
-        ("[data-testid='customer-price']", ".priceView-customer-price span", "[itemprop='price']"),
     ),
     StoreConfig(
         "B&H",
         "https://www.bhphotovideo.com/c/search?q={query}&sts=ma",
         ("bhphotovideo.com", "www.bhphotovideo.com"),
-        ("/c/product/",),
-        ("[data-selenium='pricingPrice']", "[itemprop='price']"),
     ),
     StoreConfig(
         "Micro Center",
         "https://www.microcenter.com/search/search_results.aspx?Ntt={query}",
         ("microcenter.com", "www.microcenter.com"),
-        ("/product/",),
-        ("[itemprop='price']", ".productPrice", ".price"),
     ),
     StoreConfig(
         "Adorama",
         "https://www.adorama.com/l/?searchinfo={query}",
         ("adorama.com", "www.adorama.com"),
-        ("/p/", ".html"),
-        ("[itemprop='price']", ".your-price", ".price"),
     ),
     StoreConfig(
         "Central Computers",
         "https://www.centralcomputer.com/catalogsearch/result/?q={query}",
         ("centralcomputer.com", "www.centralcomputer.com"),
-        (".html",),
-        ("[itemprop='price']", ".price"),
     ),
     StoreConfig(
         "Antonline",
         "https://www.antonline.com/Search?q={query}",
         ("antonline.com", "www.antonline.com", "node-4.antonline.com"),
-        ("/",),
-        ("[itemprop='price']", ".price"),
     ),
 )

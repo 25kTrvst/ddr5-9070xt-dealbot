@@ -51,40 +51,45 @@ class EbaySource(Source):
     async def search(self, kind: Kind) -> list[Candidate]:
         if not self.configured:
             return []
-        query = self.cfg.ram_query if kind == "ram" else self.cfg.gpu_query
+        queries = self.cfg.ram_queries if kind == "ram" else (self.cfg.gpu_query,)
         category = self.cfg.ebay_ram_category_id if kind == "ram" else self.cfg.ebay_gpu_category_id
         ceiling = self.cfg.ram_max_price if kind == "ram" else self.cfg.gpu_max_price
-        response = await self.client.get(
-            "https://api.ebay.com/buy/browse/v1/item_summary/search",
-            headers=await self._headers(),
-            params={
-                "q": query, "category_ids": category, "limit": self.cfg.ebay_max_results,
-                "sort": "newlyListed", "filter": f"conditions:{{NEW}},price:[1..{ceiling}],priceCurrency:USD,buyingOptions:{{FIXED_PRICE}}",
-                "fieldgroups": "EXTENDED",
-            },
-        )
-        response.raise_for_status()
-        output: list[Candidate] = []
-        for item in response.json().get("itemSummaries", []):
-            price = money(item.get("price"))
-            if price is None:
-                continue
-            seller = item.get("seller") or {}
-            feedback_score = int(seller.get("feedbackScore") or 0)
-            feedback_pct = float(seller.get("feedbackPercentage") or 0)
-            if feedback_score < self.cfg.ebay_min_feedback_score or feedback_pct < self.cfg.ebay_min_feedback_percent:
-                continue
-            shipping_options = item.get("shippingOptions") or []
-            shipping = money(shipping_options[0].get("shippingCost")) if shipping_options else None
-            output.append(Candidate(
-                source=self.name, source_id=str(item.get("itemId", "")), kind=kind,
-                title=str(item.get("title", "")), url=str(item.get("itemWebUrl", "")), price=price,
-                shipping=shipping, condition=str(item.get("condition", "unknown")), stock="in stock",
-                category_id=str(item.get("categoryId", category)), category_name=str((item.get("categories") or [{}])[0].get("categoryName", "")),
-                seller_feedback_score=feedback_score, seller_feedback_percent=feedback_pct, source_confidence=95,
-                metadata={"listing_type": "fixed price", "sku": item.get("legacyItemId", ""), "image": (item.get("image") or {}).get("imageUrl", "")},
-            ))
-        return output
+        headers = await self._headers()
+        seen: dict[str, Candidate] = {}
+        for query in queries:
+            response = await self.client.get(
+                "https://api.ebay.com/buy/browse/v1/item_summary/search",
+                headers=headers,
+                params={
+                    "q": query, "category_ids": category, "limit": self.cfg.ebay_max_results,
+                    "sort": "newlyListed", "filter": f"conditions:{{NEW}},price:[1..{ceiling}],priceCurrency:USD,buyingOptions:{{FIXED_PRICE}}",
+                    "fieldgroups": "EXTENDED",
+                },
+            )
+            response.raise_for_status()
+            for item in response.json().get("itemSummaries", []):
+                item_id = str(item.get("itemId", ""))
+                if not item_id or item_id in seen:
+                    continue
+                price = money(item.get("price"))
+                if price is None:
+                    continue
+                seller = item.get("seller") or {}
+                feedback_score = int(seller.get("feedbackScore") or 0)
+                feedback_pct = float(seller.get("feedbackPercentage") or 0)
+                if feedback_score < self.cfg.ebay_min_feedback_score or feedback_pct < self.cfg.ebay_min_feedback_percent:
+                    continue
+                shipping_options = item.get("shippingOptions") or []
+                shipping = money(shipping_options[0].get("shippingCost")) if shipping_options else None
+                seen[item_id] = Candidate(
+                    source=self.name, source_id=item_id, kind=kind,
+                    title=str(item.get("title", "")), url=str(item.get("itemWebUrl", "")), price=price,
+                    shipping=shipping, condition=str(item.get("condition", "unknown")), stock="in stock",
+                    category_id=str(item.get("categoryId", category)), category_name=str((item.get("categories") or [{}])[0].get("categoryName", "")),
+                    seller_feedback_score=feedback_score, seller_feedback_percent=feedback_pct, source_confidence=95,
+                    metadata={"listing_type": "fixed price", "sku": item.get("legacyItemId", ""), "image": (item.get("image") or {}).get("imageUrl", "")},
+                )
+        return list(seen.values())
 
     async def get_item(self, item_id: str, kind: Kind) -> Candidate | None:
         response = await self.client.get(f"https://api.ebay.com/buy/browse/v1/item/{item_id}", headers=await self._headers())

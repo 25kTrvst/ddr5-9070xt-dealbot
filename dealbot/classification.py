@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
+from .catalog import lookup as catalog_lookup
 from .config import Config
 from .models import Candidate, Classification
 
@@ -57,6 +58,7 @@ def _model_key(candidate: Candidate) -> str:
 def classify(candidate: Candidate, cfg: Config) -> Classification:
     text = _all_text(candidate)
     reasons: list[str] = []
+    catalog_entry = catalog_lookup(candidate)
 
     if candidate.currency.upper() != "USD":
         return Classification(False, 0, ["currency is not USD"])
@@ -80,13 +82,18 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
             return Classification(False, 0, ["9070 GRE is not RX 9070 XT"])
         if not re.search(r"\b(?:rx|radeon)\s*[- ]?9070\s*xt\b", text, re.I):
             return Classification(False, 15, ["exact RX 9070 XT identity missing"])
-        if not any(brand in text for brand in GPU_BRANDS):
+        if not any(brand in text for brand in GPU_BRANDS) and not catalog_entry:
             reasons.append("board-partner brand not recognized")
         if not re.search(r"\b(graphics card|video card|gpu|gddr6|16\s*gb)\b", text, re.I):
             return Classification(False, 45, ["standalone graphics-card evidence missing"])
         confidence = 94 if candidate.category_id == cfg.ebay_gpu_category_id else 90
+        model_key = _model_key(candidate)
+        if catalog_entry:
+            confidence = max(confidence, 97)
+            model_key = catalog_entry.model_key
+            reasons.append(f"matched preloaded catalog SKU {catalog_entry.brand} {catalog_entry.model_number}")
         reasons.append("exact RX 9070 XT identity confirmed")
-        return Classification(True, confidence, reasons, _model_key(candidate), capacity_gb=16)
+        return Classification(True, confidence, reasons, model_key, capacity_gb=16)
 
     if "ddr5" not in text:
         return Classification(False, 10, ["DDR5 identity missing"])
@@ -101,6 +108,8 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
         return Classification(False, 45, ["standalone RAM-kit evidence missing"])
     speeds = _numbers(text, r"\b(\d{4,5})\s*(?:mhz|mt/s|mts)\b")
     speed = max([x for x in speeds if 4000 <= x <= 10000], default=None)
+    if speed is None and catalog_entry and catalog_entry.speed_mts:
+        speed = catalog_entry.speed_mts
     if speed is None:
         return Classification(False, 55, ["RAM speed not confirmed"])
     if speed < cfg.ram_min_speed:
@@ -108,8 +117,15 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
     cas = next(iter(_numbers(text, r"\bcl\s*(\d{2})\b")), None)
     kit = "2x16GB" if re.search(r"(?:2\s*x\s*16|16\s*gb\s*x\s*2|16gbx2)", text, re.I) else "32GB"
     confidence = 96 if candidate.category_id == cfg.ebay_ram_category_id else 91
+    model_key = _model_key(candidate)
+    capacity = 32
+    if catalog_entry:
+        confidence = max(confidence, 97)
+        model_key = catalog_entry.model_key
+        capacity = catalog_entry.capacity_gb or capacity
+        reasons.append(f"matched preloaded catalog SKU {catalog_entry.brand} {catalog_entry.model_number}")
     reasons.extend(["standalone 32GB DDR5 confirmed", f"speed {speed} MT/s confirmed"])
-    return Classification(True, confidence, reasons, _model_key(candidate), speed, cas, kit, 32)
+    return Classification(True, confidence, reasons, model_key, speed, cas, kit, capacity)
 
 
 def retailer_from_url(url: str) -> str:

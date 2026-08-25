@@ -1,3 +1,4 @@
+from dealbot.catalog import lookup as catalog_lookup
 from dealbot.classification import classify
 from dealbot.config import Config
 from dealbot.models import Candidate
@@ -57,3 +58,21 @@ def test_resale_uses_sold_comps_and_all_costs():
 def test_resale_requires_three_exact_model_comps():
     c = item("ram", "Corsair 32GB 6000MHz DDR5 DIMM memory kit", 100)
     assert resale_profit(c, [180, 190], CFG) == (None, None)
+
+
+def test_catalog_match_boosts_confidence_and_sets_deterministic_model_key():
+    c = item("ram", "Corsair Vengeance 32GB (2x16GB) DDR5 6000MHz CL30 memory kit", 130,
+             metadata={"model": "CMK32GX5M2B6000C30"})
+    result = classify(c, CFG)
+    assert result.accepted and result.confidence >= 97 and result.model_key == "CORSAIR:CMK32GX5M2B6000C30"
+    assert catalog_lookup(c) is not None
+
+
+def test_ram_queries_cover_every_configured_speed_tier():
+    cfg = Config(discord_token="test", ram_min_speed=5000)
+    assert cfg.ram_queries == tuple(f"32GB DDR5 desktop memory {s}MHz" for s in (5000, 5200, 5600, 6000, 6400))
+
+
+def test_ram_queries_drop_speeds_below_the_configured_minimum():
+    cfg = Config(discord_token="test", ram_min_speed=5600)
+    assert all(s >= 5600 for s in cfg.ram_speeds)

@@ -8,14 +8,14 @@ from discord.ext import commands
 
 from .config import Config
 from .models import Deal, Kind
-from .orchestrator import Engine
+from .orchestrator import CRASH_RESTART_DELAY_SECONDS, Engine
 
 
 class DealBot(commands.Bot):
     def __init__(self, cfg: Config):
         intents = discord.Intents.default()
         super().__init__(command_prefix="!", intents=intents)
-        self.cfg = cfg; self.engine = Engine(cfg, self.post_deal); self._engine_started = False
+        self.cfg = cfg; self.engine = Engine(cfg, self.post_deal, self.post_crash); self._engine_started = False
 
     async def setup_hook(self) -> None:
         await self.add_cog(DealCog(self))
@@ -34,23 +34,48 @@ class DealBot(commands.Bot):
         c, cl = deal.candidate, deal.classification
         channel = self._channel(deal.kind)
         if not channel: return
-        color = discord.Color.green() if deal.recommendation.startswith("BUY") else discord.Color.gold()
+        if deal.unconfirmed:
+            color = discord.Color.red()
+        elif deal.recommendation.startswith("BUY"):
+            color = discord.Color.green()
+        else:
+            color = discord.Color.gold()
         label = "RX 9070 XT" if deal.kind == "gpu" else f"32GB DDR5 {cl.speed_mts} MT/s"
-        embed = discord.Embed(title=f"{'✅' if deal.score >= 78 else '👀'} {label} — {deal.recommendation}", description=c.title[:4000], url=c.url, color=color)
+        icon = "⚠️" if deal.unconfirmed else ("✅" if deal.score >= 78 else "👀")
+        embed = discord.Embed(title=f"{icon} {label} — {deal.recommendation}", description=c.title[:4000], url=c.url, color=color)
         embed.add_field(name="Price", value=f"${c.price:.2f}", inline=True)
         embed.add_field(name="Estimated checkout", value=f"${deal.estimated_total:.2f}", inline=True)
         embed.add_field(name="Deal score", value=f"{deal.score}/100", inline=True)
         embed.add_field(name="Store", value=c.source, inline=True)
         embed.add_field(name="Condition / stock", value=f"{c.condition} / {c.stock}", inline=True)
         embed.add_field(name="Identity", value=f"{cl.confidence}/100\n`{cl.model_key}`", inline=True)
+        if deal.market_sample_count >= 3 and deal.market_baseline is not None:
+            embed.add_field(name=f"Market baseline ({deal.market_sample_count} sources)", value=f"${deal.market_baseline:.2f}", inline=True)
+        if deal.low_30d_all_sources is not None:
+            embed.add_field(name="30-day low (all stores)", value=f"${deal.low_30d_all_sources:.2f}", inline=True)
         if c.seller_feedback_score is not None:
             embed.add_field(name="eBay seller quality", value=f"{c.seller_feedback_score:,} feedback • {c.seller_feedback_percent:.1f}% positive", inline=False)
+        if deal.unconfirmed:
+            embed.add_field(name="⚠️ Unconfirmed price", value="Far below the normal range and seen on only one price surface so far. Double-check the listing yourself before buying.", inline=False)
         embed.add_field(name="Why", value=deal.recommendation_reason[:1024], inline=False)
         embed.add_field(name="Verification", value=" • ".join(cl.reasons)[:1024], inline=False)
         embed.set_footer(text="DealBot V6 • exact identity gates • verified price • persistent SKU watchlist")
         view = discord.ui.View(timeout=None); view.add_item(discord.ui.Button(label="Open verified deal", url=c.url, emoji="🔗"))
         mention = f"<@{self.cfg.ping_user_id}>" if self.cfg.ping_user_id else None
         await channel.send(content=mention, embed=embed, view=view)
+
+    async def post_crash(self, task_name: str, exc: Exception) -> None:
+        target = discord.utils.find(lambda c: getattr(c, "name", "").lower() == self.cfg.ops_channel_name, self.get_all_channels())
+        target = target or self._channel("gpu") or self._channel("ram")
+        text = f"**{task_name}** crashed with `{type(exc).__name__}: {exc}`.\nIt has been restarted automatically — check `/status` for its current state."
+        mention = f"<@{self.cfg.ping_user_id}>" if self.cfg.ping_user_id else None
+        embed = discord.Embed(title="🚨 Scanner crashed", description=text[:4000], color=discord.Color.red())
+        if target:
+            await target.send(content=mention, embed=embed)
+        elif self.cfg.ping_user_id:
+            user = self.get_user(self.cfg.ping_user_id) or await self.fetch_user(self.cfg.ping_user_id)
+            if user:
+                await user.send(embed=embed)
 
     async def status_cmd(self, interaction: discord.Interaction):
         rows = await self.engine.storage.health()
@@ -59,6 +84,8 @@ class DealBot(commands.Bot):
         embed = discord.Embed(title="DealBot V6 status", color=discord.Color.blurple())
         embed.add_field(name="Fast lanes", value=f"eBay {self.cfg.ebay_interval_seconds}s • Best Buy {self.cfg.bestbuy_interval_seconds}s • Reddit {self.cfg.reddit_interval_seconds}s", inline=False)
         embed.add_field(name="Watch/discovery", value=f"Known SKUs {self.cfg.watchlist_interval_seconds}s • store searches {self.cfg.slow_interval_seconds}s • blocks {self.cfg.blocked_backoff_min_seconds//60}–{self.cfg.blocked_backoff_max_seconds//60}m", inline=False)
+        embed.add_field(name="RAM speed tiers searched", value=", ".join(f"{s} MT/s" for s in self.cfg.ram_speeds), inline=False)
+        embed.add_field(name="Crash alerts", value=f"Posted to #{self.cfg.ops_channel_name} (falls back to #{self.cfg.gpu_channel_name} or a DM) — a crashed scanner auto-restarts after {CRASH_RESTART_DELAY_SECONDS}s", inline=False)
         embed.add_field(name="Connections", value=api, inline=False)
         embed.add_field(name="Latest results", value=health[:1024], inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)

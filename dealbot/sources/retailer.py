@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 
+from ..browser import BrowserManager
 from ..config import Config, StoreConfig
 from ..models import Candidate, Kind
-from .base import BlockedSource, Source, SourceError, money
+from .base import BlockedSource, Source, SourceError
+from .parsers import get_parser
 
 
 class RetailerSource(Source):
-    def __init__(self, cfg: Config, store: StoreConfig, client: httpx.AsyncClient):
-        self.cfg, self.store, self.client, self.name = cfg, store, client, store.name
+    def __init__(self, cfg: Config, store: StoreConfig, client: httpx.AsyncClient, browser: BrowserManager):
+        self.cfg, self.store, self.client, self.browser, self.name = cfg, store, client, browser, store.name
+        self.parser = get_parser(store.name)
 
     async def _get(self, url: str) -> str:
         headers = {"User-Agent": "Mozilla/5.0 (compatible; DealBot/6.0; personal price monitor)"}
@@ -30,89 +31,49 @@ class RetailerSource(Source):
         return r.text
 
     async def _browser_get(self, url: str) -> str:
-        if not self.cfg.browser_fallback: return ""
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            try:
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=self.cfg.browser_timeout_seconds * 1000)
-                html = await page.content()
-                if (response and response.status in {403, 429}) or re.search(r"access denied|verify you are human|captcha", html, re.I):
-                    raise BlockedSource("browser was challenged; respecting a 30–60 minute cooldown")
-                return html
-            finally:
-                await browser.close()
+        if not self.cfg.browser_fallback:
+            return ""
+        return await self.browser.fetch(url, self.cfg.browser_timeout_seconds)
 
     async def search(self, kind: Kind) -> list[Candidate]:
-        query = self.cfg.ram_query if kind == "ram" else self.cfg.gpu_query
-        url = self.store.search_url.format(query=quote_plus(query))
-        html = await self._get(url); soup = BeautifulSoup(html, "lxml")
+        queries = self.cfg.ram_queries if kind == "ram" else (self.cfg.gpu_query,)
         urls: list[str] = []
-        for a in soup.select("a[href]"):
-            href = str(a.get("href", ""))
-            if any(marker in href for marker in self.store.product_markers):
-                full = urljoin(url, href).split("?")[0]
-                if full not in urls:
-                    urls.append(full)
-        if not urls and self.cfg.browser_fallback:
-            soup = BeautifulSoup(await self._browser_get(url), "lxml")
-            for a in soup.select("a[href]"):
-                href = str(a.get("href", ""))
-                if any(marker in href for marker in self.store.product_markers):
-                    full = urljoin(url, href).split("?")[0]
-                    if full not in urls: urls.append(full)
+        for query in queries:
+            search_url = self.store.search_url.format(query=quote_plus(query))
+            for found in await self._collect_links(search_url):
+                if found not in urls:
+                    urls.append(found)
         limiter = asyncio.Semaphore(self.cfg.store_concurrency)
+
         async def one(product_url: str) -> Candidate | None:
             try:
-                async with limiter: return await self.verify_url(product_url, kind)
+                async with limiter:
+                    return await self.verify_url(product_url, kind)
             except (SourceError, httpx.HTTPError):
                 return None
+
         checked = await asyncio.gather(*(one(u) for u in urls[: self.cfg.max_detail_pages_per_store]))
         return [x for x in checked if x is not None]
 
+    async def _collect_links(self, search_url: str) -> list[str]:
+        html = await self._get(search_url)
+        links = self.parser.find_product_links(BeautifulSoup(html, "lxml"), search_url)
+        if not links and self.cfg.browser_fallback:
+            rendered = await self._browser_get(search_url)
+            if rendered:
+                links = self.parser.find_product_links(BeautifulSoup(rendered, "lxml"), search_url)
+        return links
+
     async def verify_url(self, url: str, kind: Kind) -> Candidate | None:
-        html = await self._get(url); soup = BeautifulSoup(html, "lxml")
-        title = ""
-        price: float | None = None
-        condition = "unknown"
-        stock = "unknown"
-        sku = ""
-        upc = ""
-        model = ""
-        for node in soup.select("script[type='application/ld+json']"):
-            try:
-                data = json.loads(node.get_text(strip=True))
-                entries = data if isinstance(data, list) else [data]
-                for entry in entries:
-                    if not isinstance(entry, dict) or entry.get("@type") != "Product":
-                        continue
-                    title = str(entry.get("name", title))
-                    sku, upc = str(entry.get("sku", "")), str(entry.get("gtin12", entry.get("gtin", "")))
-                    model = str(entry.get("mpn", entry.get("model", "")))
-                    offers = entry.get("offers") or {}
-                    if isinstance(offers, list): offers = offers[0] if offers else {}
-                    price = money(offers.get("price", price))
-                    stock = "in stock" if "instock" in str(offers.get("availability", "")).lower() else "unknown"
-                    condition = "new" if "new" in str(offers.get("itemCondition", "")).lower() else condition
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                continue
-        title = title or (soup.title.get_text(" ", strip=True) if soup.title else "")
-        if price is None:
-            for selector in self.store.price_selectors:
-                node = soup.select_one(selector)
-                if node:
-                    price = money(node.get("content") or re.sub(r"[^0-9.]", "", node.get_text()))
-                    if price is not None: break
-        if not title or price is None:
-            if self.cfg.browser_fallback:
-                soup = BeautifulSoup(await self._browser_get(url), "lxml")
-                title = soup.title.get_text(" ", strip=True) if soup.title else title
-                for selector in self.store.price_selectors:
-                    node = soup.select_one(selector)
-                    if node:
-                        price = money(node.get("content") or re.sub(r"[^0-9.]", "", node.get_text()))
-                        if price is not None: break
-            if not title or price is None: return None
-        source_id = sku or re.sub(r"\W+", "-", url.rstrip("/").rsplit("/", 1)[-1])[:100]
-        return Candidate(self.name, source_id, kind, title, url, price, condition=condition,
-            stock=stock, source_confidence=82, metadata={"sku": sku, "upc": upc, "model": model})
+        html = await self._get(url)
+        product = self.parser.parse_product_page(BeautifulSoup(html, "lxml"))
+        if not product.is_complete and self.cfg.browser_fallback:
+            rendered = await self._browser_get(url)
+            if rendered:
+                self.parser.refine_from_rendered(BeautifulSoup(rendered, "lxml"), product)
+        if not product.is_complete:
+            return None
+        source_id = product.sku or re.sub(r"\W+", "-", url.rstrip("/").rsplit("/", 1)[-1])[:100]
+        return Candidate(self.name, source_id, kind, product.title, url, product.price,
+            condition=product.condition, stock=product.stock, source_confidence=82,
+            metadata={"sku": product.sku, "upc": product.upc, "model": product.model})
