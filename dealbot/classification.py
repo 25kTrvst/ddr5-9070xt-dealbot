@@ -100,11 +100,13 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
     if re.search(r"\b(sodimm|so-dimm|laptop memory)\b", text, re.I):
         return Classification(False, 0, ["laptop/SODIMM memory rejected"])
     capacities = _numbers(text, r"\b(\d{1,3})\s*gb\b")
-    if 32 not in capacities:
-        return Classification(False, 40, ["32GB total capacity not confirmed"])
+    matched_capacity = next((c for c in cfg.ram_capacities_gb if c in capacities), None)
+    if matched_capacity is None:
+        wanted = "/".join(str(c) for c in cfg.ram_capacities_gb)
+        return Classification(False, 40, [f"none of the configured capacities ({wanted}GB) confirmed"])
     if any(x >= 128 for x in capacities) or re.search(r"\b[1248]\s*tb\b", text, re.I):
         return Classification(False, 0, ["storage/system capacity detected"])
-    if not (any(brand in text for brand in RAM_BRANDS) or re.search(r"\b(u-?dimm|dimm|288[ -]?pin|memory (kit|module)|2\s*x\s*16\s*gb|16\s*gb\s*x\s*2)\b", text, re.I)):
+    if not (any(brand in text for brand in RAM_BRANDS) or re.search(r"\b(u-?dimm|dimm|288[ -]?pin|memory (kit|module)|\d\s*x\s*\d+\s*gb|\d+\s*gb\s*x\s*\d)\b", text, re.I)):
         return Classification(False, 45, ["standalone RAM-kit evidence missing"])
     speeds = _numbers(text, r"\b(\d{4,5})\s*(?:mhz|mt/s|mts)\b")
     speed = max([x for x in speeds if 4000 <= x <= 10000], default=None)
@@ -115,16 +117,23 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
     if speed < cfg.ram_min_speed:
         return Classification(False, 0, [f"{speed} MT/s is below {cfg.ram_min_speed}"])
     cas = next(iter(_numbers(text, r"\bcl\s*(\d{2})\b")), None)
-    kit = "2x16GB" if re.search(r"(?:2\s*x\s*16|16\s*gb\s*x\s*2|16gbx2)", text, re.I) else "32GB"
+    kit_match = re.search(r"(\d+)\s*x\s*(\d+)\s*gb", text, re.I)
+    reverse_kit_match = re.search(r"(\d+)\s*gb\s*x\s*(\d+)", text, re.I)
+    if kit_match:
+        kit = f"{kit_match.group(1)}x{kit_match.group(2)}GB"
+    elif reverse_kit_match:
+        kit = f"{reverse_kit_match.group(2)}x{reverse_kit_match.group(1)}GB"
+    else:
+        kit = f"{matched_capacity}GB"
     confidence = 96 if candidate.category_id == cfg.ebay_ram_category_id else 91
     model_key = _model_key(candidate)
-    capacity = 32
+    capacity = matched_capacity
     if catalog_entry:
         confidence = max(confidence, 97)
         model_key = catalog_entry.model_key
         capacity = catalog_entry.capacity_gb or capacity
         reasons.append(f"matched preloaded catalog SKU {catalog_entry.brand} {catalog_entry.model_number}")
-    reasons.extend(["standalone 32GB DDR5 confirmed", f"speed {speed} MT/s confirmed"])
+    reasons.extend([f"standalone {matched_capacity}GB DDR5 confirmed", f"speed {speed} MT/s confirmed"])
     return Classification(True, confidence, reasons, model_key, speed, cas, kit, capacity)
 
 

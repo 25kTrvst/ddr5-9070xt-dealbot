@@ -127,6 +127,22 @@ class Storage:
             return None, None, 0
         return round(median(prices), 2), round(min(prices), 2), len(prices)
 
+    async def price_history(self, kind: str, model_key: str, days: int) -> list[tuple[str, float]]:
+        """Timestamped price points for the exact model across every store,
+        oldest first, for charting a real price-over-time trend."""
+        if not model_key:
+            return []
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                """SELECT o.observed_at, o.price FROM observations o
+                   JOIN listings l ON o.source=l.source AND o.source_id=l.source_id
+                   WHERE l.kind=? AND l.model_key=? AND o.observed_at>=?
+                   ORDER BY o.observed_at""",
+                (kind, model_key, since),
+            )
+            return [(row[0], row[1]) for row in await cur.fetchall()]
+
     async def health(self) -> list[dict[str, str]]:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row

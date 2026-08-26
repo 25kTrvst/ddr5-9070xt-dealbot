@@ -20,6 +20,7 @@ from .sources.discovery import Lead, RedditDiscovery, SlickdealsDiscovery, ZohoD
 from .sources.ebay import EbaySource
 from .sources.retailer import RetailerSource
 from .storage import Storage
+from .webstatus import StatusWebServer
 
 CRASH_RESTART_DELAY_SECONDS = 30
 
@@ -35,10 +36,13 @@ class Engine:
         self.discovery = [RedditDiscovery(cfg, self.client), SlickdealsDiscovery(cfg), ZohoDiscovery(cfg)]
         self.tasks: list[asyncio.Task] = []; self._locks = defaultdict(lambda: asyncio.Semaphore(cfg.store_concurrency))
         self._blocked_until: dict[str, datetime] = {}; self.last_scans: dict[str, str] = {}
+        self.web = StatusWebServer(cfg, self) if cfg.status_web_enabled else None
 
     async def start(self) -> None:
         await self.storage.initialize()
         await self.browser.start()
+        if self.web:
+            self.web.start()
         self.tasks.extend([
             self._spawn(lambda: self._source_loop(self.ebay, self.cfg.ebay_interval_seconds), "ebay-fast"),
             self._spawn(lambda: self._source_loop(self.bestbuy, self.cfg.bestbuy_interval_seconds, initial_delay=20), "bestbuy-fast"),
@@ -82,6 +86,8 @@ class Engine:
         await asyncio.gather(*self.tasks, return_exceptions=True)
         await self.client.aclose()
         await self.browser.stop()
+        if self.web:
+            self.web.stop()
 
     async def _source_loop(self, source, interval: int, jitter: int = 10, initial_delay: float = 0) -> None:
         await asyncio.sleep(initial_delay + random.uniform(0, min(15, interval / 4)))

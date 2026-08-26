@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .charts import render_price_history
 from .config import Config
 from .models import Deal, Kind
 from .orchestrator import CRASH_RESTART_DELAY_SECONDS, Engine
@@ -40,7 +42,7 @@ class DealBot(commands.Bot):
             color = discord.Color.green()
         else:
             color = discord.Color.gold()
-        label = "RX 9070 XT" if deal.kind == "gpu" else f"32GB DDR5 {cl.speed_mts} MT/s"
+        label = "RX 9070 XT" if deal.kind == "gpu" else f"{cl.capacity_gb}GB DDR5 {cl.speed_mts} MT/s"
         icon = "⚠️" if deal.unconfirmed else ("✅" if deal.score >= 78 else "👀")
         embed = discord.Embed(title=f"{icon} {label} — {deal.recommendation}", description=c.title[:4000], url=c.url, color=color)
         embed.add_field(name="Price", value=f"${c.price:.2f}", inline=True)
@@ -62,7 +64,14 @@ class DealBot(commands.Bot):
         embed.set_footer(text="DealBot V6 • exact identity gates • verified price • persistent SKU watchlist")
         view = discord.ui.View(timeout=None); view.add_item(discord.ui.Button(label="Open verified deal", url=c.url, emoji="🔗"))
         mention = f"<@{self.cfg.ping_user_id}>" if self.cfg.ping_user_id else None
-        await channel.send(content=mention, embed=embed, view=view)
+        chart_file = None
+        if self.cfg.price_chart_enabled:
+            history = await self.engine.storage.price_history(deal.kind, cl.model_key, self.cfg.price_chart_history_days)
+            png = render_price_history(history, cl.model_key or label)
+            if png:
+                chart_file = discord.File(io.BytesIO(png), filename="price_history.png")
+                embed.set_image(url="attachment://price_history.png")
+        await channel.send(content=mention, embed=embed, view=view, file=chart_file)
 
     async def post_crash(self, task_name: str, exc: Exception) -> None:
         target = discord.utils.find(lambda c: getattr(c, "name", "").lower() == self.cfg.ops_channel_name, self.get_all_channels())

@@ -76,3 +76,22 @@ def test_ram_queries_cover_every_configured_speed_tier():
 def test_ram_queries_drop_speeds_below_the_configured_minimum():
     cfg = Config(discord_token="test", ram_min_speed=5600)
     assert all(s >= 5600 for s in cfg.ram_speeds)
+
+
+def test_default_capacity_behavior_is_unchanged():
+    c = item("ram", "Corsair 32GB (2x16GB) DDR5 6000MHz DIMM memory kit", 130)
+    result = classify(c, CFG)
+    assert result.accepted and result.capacity_gb == 32
+
+
+def test_configured_capacity_other_than_32gb_is_accepted():
+    cfg = Config(discord_token="test", ram_capacities_gb=(32, 64))
+    c = item("ram", "Corsair Vengeance 64GB (2x32GB) DDR5 6000MHz CL30 memory kit", 220)
+    result = classify(c, cfg)
+    assert result.accepted and result.capacity_gb == 64 and result.kit_config == "2x32GB"
+
+
+def test_capacity_not_in_configured_list_is_rejected():
+    cfg = Config(discord_token="test", ram_capacities_gb=(32,))
+    c = item("ram", "Corsair 64GB (2x32GB) DDR5 6000MHz DIMM memory kit", 220)
+    assert not classify(c, cfg).accepted

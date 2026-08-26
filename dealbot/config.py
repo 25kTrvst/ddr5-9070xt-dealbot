@@ -70,7 +70,8 @@ class Config:
     ram_query: str = field(default_factory=lambda: os.getenv("RAM_QUERY", "32GB DDR5 desktop memory 6000MHz"))
     gpu_query: str = field(default_factory=lambda: os.getenv("GPU_QUERY", "RX 9070 XT graphics card"))
     ram_speeds: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_SPEEDS", [5000, 5200, 5600, 6000, 6400])))
-    ram_query_template: str = field(default_factory=lambda: os.getenv("RAM_QUERY_TEMPLATE", "32GB DDR5 desktop memory {speed}MHz"))
+    ram_capacities_gb: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_CAPACITIES_GB", [32])))
+    ram_query_template: str = field(default_factory=lambda: os.getenv("RAM_QUERY_TEMPLATE", "{capacity}GB DDR5 desktop memory {speed}MHz"))
     ram_queries: tuple[str, ...] = field(default_factory=tuple)
     ram_max_price: float = field(default_factory=lambda: env_float("RAM_MAX_PRICE", 200, 1))
     ram_hot_price: float = field(default_factory=lambda: env_float("RAM_HOT_PRICE", 150, 1))
@@ -133,6 +134,11 @@ class Config:
     minimum_identity_confidence: int = field(default_factory=lambda: env_int("MIN_IDENTITY_CONFIDENCE", 88, 75, 100))
     database_path: Path = field(default_factory=lambda: ROOT / os.getenv("DATABASE_FILE", "dealbot_v6.sqlite3"))
 
+    status_web_enabled: bool = field(default_factory=lambda: env_bool("STATUS_WEB_ENABLED", True))
+    status_web_port: int = field(default_factory=lambda: env_int("STATUS_WEB_PORT", 8765, 1024, 65535))
+    price_chart_enabled: bool = field(default_factory=lambda: env_bool("PRICE_CHART_ENABLED", True))
+    price_chart_history_days: int = field(default_factory=lambda: env_int("PRICE_CHART_HISTORY_DAYS", 90, 7, 365))
+
     resale_fee_percent: float = field(default_factory=lambda: env_float("RESALE_FEE_PERCENT", 13.6, 0))
     resale_fixed_fee: float = field(default_factory=lambda: env_float("RESALE_FIXED_FEE", 0.40, 0))
     resale_outbound_shipping: float = field(default_factory=lambda: env_float("RESALE_OUTBOUND_SHIPPING", 10, 0))
@@ -149,7 +155,11 @@ class Config:
     def __post_init__(self) -> None:
         speeds = tuple(s for s in sorted(set(self.ram_speeds)) if s >= self.ram_min_speed) or (self.ram_min_speed,)
         self.ram_speeds = speeds
-        self.ram_queries = tuple(self.ram_query_template.format(speed=s) for s in speeds)
+        capacities = tuple(sorted(set(self.ram_capacities_gb))) or (32,)
+        self.ram_capacities_gb = capacities
+        self.ram_queries = tuple(
+            self.ram_query_template.format(capacity=c, speed=s) for c in capacities for s in speeds
+        )
 
     def validate(self) -> list[str]:
         issues: list[str] = []
