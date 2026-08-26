@@ -69,7 +69,7 @@ def test_catalog_match_boosts_confidence_and_sets_deterministic_model_key():
 
 
 def test_ram_queries_cover_every_configured_speed_tier():
-    cfg = Config(discord_token="test", ram_min_speed=5000)
+    cfg = Config(discord_token="test", ram_min_speed=5000, ram_capacities_gb=(32,))
     assert cfg.ram_queries == tuple(f"32GB DDR5 desktop memory {s}MHz" for s in (5000, 5200, 5600, 6000, 6400))
 
 
@@ -115,3 +115,14 @@ def test_9070_xt_still_works_and_gre_still_rejected_with_second_gpu_enabled():
     cfg = Config(discord_token="test", gpu2_enabled=True)
     assert classify(item("gpu", "XFX Radeon RX 9070 XT 16GB GDDR6 Graphics Card", 549.99, condition="new"), cfg).accepted
     assert not classify(item("gpu", "AMD Radeon RX 9070 GRE 16GB Graphics Card", 499, condition="new"), cfg).accepted
+
+
+def test_16gb_kit_is_tracked_by_default_alongside_32gb():
+    c = item("ram", "Patriot Viper Elite 5 16GB DDR5 6000MHz CL30 memory module", 45, condition="new")
+    result = classify(c, CFG)
+    assert result.accepted and result.capacity_gb == 16
+
+
+def test_expanded_ram_brand_list_recognizes_sub_brand_names():
+    c = item("ram", "HyperX Fury 32GB (2x16GB) DDR5 6000MHz DIMM Desktop Memory", 130, condition="new")
+    assert classify(c, CFG).accepted

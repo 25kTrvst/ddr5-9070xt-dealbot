@@ -71,7 +71,7 @@ class Config:
     gpu_query: str = field(default_factory=lambda: os.getenv("GPU_QUERY", "RX 9070 XT graphics card"))
     gpu_queries: tuple[str, ...] = field(default_factory=tuple)
     ram_speeds: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_SPEEDS", [5000, 5200, 5600, 6000, 6400])))
-    ram_capacities_gb: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_CAPACITIES_GB", [32])))
+    ram_capacities_gb: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_CAPACITIES_GB", [16, 32])))
     ram_query_template: str = field(default_factory=lambda: os.getenv("RAM_QUERY_TEMPLATE", "{capacity}GB DDR5 desktop memory {speed}MHz"))
     ram_queries: tuple[str, ...] = field(default_factory=tuple)
     ram_max_price: float = field(default_factory=lambda: env_float("RAM_MAX_PRICE", 200, 1))

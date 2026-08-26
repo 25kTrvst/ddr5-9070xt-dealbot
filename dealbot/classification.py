@@ -15,9 +15,15 @@ OPEN_BOX = re.compile(r"\b(open[ -]?box|used|pre-owned|refurb|renewed|seller ref
 SPONSORED = re.compile(r"\bsponsored\b", re.I)
 
 RAM_BRANDS = (
+    # Manufacturers
     "corsair", "g.skill", "gskill", "kingston", "crucial", "teamgroup", "team group",
     "patriot", "silicon power", "v-color", "vcolor", "adata", "xpg", "geil", "oloy",
-    "mushkin", "pny", "lexar", "klevv", "thermaltake",
+    "mushkin", "pny", "lexar", "klevv", "thermaltake", "hyperx", "apacer", "zadak",
+    "avexir", "netac", "biwin", "timetec", "transcend", "innodisk", "kingbank",
+    "goldkey", "centon", "acer", "predator", "asus", "rog strix", "gigabyte", "aorus", "msi",
+    # Sub-brand / product-line names that often appear without the parent brand
+    "viper", "vengeance", "dominator", "trident", "ripjaws", "flare x", "fury",
+    "renegade", "ballistix", "t-force", "tforce", "t-create",
 )
 GPU_BRANDS = ("amd", "radeon", "xfx", "powercolor", "sapphire", "asrock", "asus", "gigabyte", "yeston")
 
