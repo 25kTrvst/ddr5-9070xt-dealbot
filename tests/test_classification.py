@@ -43,10 +43,13 @@ def test_gpu_accessory_open_box_and_bundle_rejected():
     assert not classify(item("gpu", "RX 9070 XT + motherboard bundle", 550, condition="new"), CFG).accepted
 
 
-def test_first_observation_does_not_claim_insane_or_buy():
-    c = item("gpu", "XFX Quicksilver AMD Radeon RX 9070 XT 16GB GDDR6 Graphics Card", 549.99, condition="new")
+def test_first_observation_can_now_be_a_buy():
+    # The first-sighting cap was deliberately removed on request: a first
+    # sighting with a strong enough price now alerts immediately instead of
+    # waiting for the watchlist to confirm it on a second scan.
+    c = item("gpu", "XFX Quicksilver AMD Radeon RX 9070 XT 16GB GDDR6 Graphics Card", 480, condition="new")
     cl = classify(c, CFG); deal = make_deal(c, cl, CFG, observations=0)
-    assert deal.score <= 82 and deal.recommendation == "WAIT / WATCH"
+    assert deal.recommendation == "BUY"
 
 
 def test_resale_uses_sold_comps_and_all_costs():

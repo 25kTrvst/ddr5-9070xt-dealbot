@@ -27,8 +27,6 @@ def make_deal(c: Candidate, cl: Classification, cfg: Config, observations: int =
     score = 55 + max(0, min(30, int((1 - ratio) * 100))) + max(0, (cl.confidence - 85) // 2)
     if c.condition.lower() == "new":
         score += 3
-    if observations == 0:
-        score = min(score, 82)  # first sighting cannot be called "insane"
     if previous and c.price < previous:
         score += min(8, int(previous - c.price))
     below_baseline = market_sample_count >= 3 and market_baseline is not None and c.price < market_baseline
@@ -45,7 +43,7 @@ def make_deal(c: Candidate, cl: Classification, cfg: Config, observations: int =
     if profit is not None and profit >= cfg.resale_min_profit:
         recommendation = "BUY / RESALE MARGIN"
         reason = f"Exact-model sold median ${sale:.2f}; estimated net profit ${profit:.2f}.{reason_suffix}"
-    elif score >= 78 and observations >= 1:
+    elif score >= 78:
         recommendation = "BUY"
         reason = f"Verified exact product and price; price is strong against your configured limit.{reason_suffix}"
     else:

@@ -23,7 +23,7 @@ V6 is a clean, separate rebuild focused on speed **and** product identity. It ne
 - Stores run in parallel, with at most two active requests per store.
 - Strict gates reject systems, adapters, upgrade services, bundles, sponsored prices, open-box/used items, SODIMMs, DDR5 below 5000 MT/s, and RX 9070 GRE.
 - Extremely cheap first sightings are flagged `⚠️ UNCONFIRMED` and alerted right away rather than hidden, until the same listing is observed again or a second source corroborates the exact model and price.
-- First observations cannot be called “insane.” `WAIT / WATCH` results stay silent and enter the watchlist; Discord alerts are reserved for a later verified `BUY`, a real price drop, an unconfirmed-price warning, or confirmed resale margin.
+- A first sighting can now alert immediately as `BUY` if the price and identity confidence are strong enough — it no longer waits for a second scan to confirm the same listing first. `WAIT / WATCH` results still stay silent and enter the watchlist; Discord alerts fire for a `BUY`, a real price drop, a restock, an unconfirmed-price warning, or confirmed resale margin.
 
 ## Setup
 
