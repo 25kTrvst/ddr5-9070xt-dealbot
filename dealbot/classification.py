@@ -32,7 +32,7 @@ def _numbers(text: str, pattern: str) -> list[int]:
     return [int(x) for x in re.findall(pattern, text, re.I)]
 
 
-def _model_key(candidate: Candidate) -> str:
+def _model_key(candidate: Candidate, gpu_label: str = "") -> str:
     kind, text = candidate.kind, candidate.title
     for name, values in candidate.aspects.items():
         if name.lower() in {"mpn", "model", "model number", "manufacturer part number"} and values:
@@ -51,7 +51,7 @@ def _model_key(candidate: Candidate) -> str:
         return useful[-1][:80]
     clean = re.sub(r"[^a-z0-9]+", " ", text.lower())
     brand = next((b.replace(" ", "") for b in (RAM_BRANDS if kind == "ram" else GPU_BRANDS) if b in clean), "unknown")
-    core = "rx9070xt" if kind == "gpu" else "ddr5"
+    core = re.sub(r"[^a-z0-9]", "", gpu_label.lower()) if kind == "gpu" and gpu_label else ("rx9070xt" if kind == "gpu" else "ddr5")
     return f"{brand}:{core}:{' '.join(clean.split()[:10])}"[:120]
 
 
@@ -78,22 +78,29 @@ def classify(candidate: Candidate, cfg: Config) -> Classification:
         return Classification(False, 0, ["bundle/combo listing"])
 
     if candidate.kind == "gpu":
-        if re.search(r"\b9070\s*gre\b", text, re.I):
+        is_gre = bool(re.search(r"\b9070\s*gre\b", text, re.I))
+        is_9070xt = bool(re.search(r"\b(?:rx|radeon)\s*[- ]?9070\s*xt\b", text, re.I)) and not is_gre
+        is_gpu2 = cfg.gpu2_enabled and bool(re.search(r"\b(?:rx|radeon)\s*[- ]?7900\s*xtx\b", text, re.I))
+        if is_gre and not is_gpu2:
             return Classification(False, 0, ["9070 GRE is not RX 9070 XT"])
-        if not re.search(r"\b(?:rx|radeon)\s*[- ]?9070\s*xt\b", text, re.I):
-            return Classification(False, 15, ["exact RX 9070 XT identity missing"])
+        if not (is_9070xt or is_gpu2):
+            wanted = "RX 9070 XT" + (f" or {cfg.gpu2_label}" if cfg.gpu2_enabled else "")
+            return Classification(False, 15, [f"exact {wanted} identity missing"])
+        label = cfg.gpu2_label if is_gpu2 else "RX 9070 XT"
+        capacity = 24 if is_gpu2 else 16
         if not any(brand in text for brand in GPU_BRANDS) and not catalog_entry:
             reasons.append("board-partner brand not recognized")
-        if not re.search(r"\b(graphics card|video card|gpu|gddr6|16\s*gb)\b", text, re.I):
+        if not re.search(r"\b(graphics card|video card|gpu|gddr6|(?:16|24)\s*gb)\b", text, re.I):
             return Classification(False, 45, ["standalone graphics-card evidence missing"])
         confidence = 94 if candidate.category_id == cfg.ebay_gpu_category_id else 90
-        model_key = _model_key(candidate)
+        model_key = _model_key(candidate, label)
         if catalog_entry:
             confidence = max(confidence, 97)
             model_key = catalog_entry.model_key
+            capacity = catalog_entry.capacity_gb or capacity
             reasons.append(f"matched preloaded catalog SKU {catalog_entry.brand} {catalog_entry.model_number}")
-        reasons.append("exact RX 9070 XT identity confirmed")
-        return Classification(True, confidence, reasons, model_key, capacity_gb=16)
+        reasons.append(f"exact {label} identity confirmed")
+        return Classification(True, confidence, reasons, model_key, capacity_gb=capacity, identity_label=label)
 
     if "ddr5" not in text:
         return Classification(False, 10, ["DDR5 identity missing"])

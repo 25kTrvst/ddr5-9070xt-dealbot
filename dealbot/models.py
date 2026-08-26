@@ -47,6 +47,7 @@ class Classification:
     cas_latency: int | None = None
     kit_config: str = ""
     capacity_gb: int | None = None
+    identity_label: str = ""
 
 
 @dataclass(slots=True)

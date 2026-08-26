@@ -19,8 +19,10 @@ def resale_profit(c: Candidate, sold_prices: list[float], cfg: Config) -> tuple[
 def make_deal(c: Candidate, cl: Classification, cfg: Config, observations: int = 0,
               previous: float | None = None, low_30d: float | None = None,
               sold_prices: list[float] | None = None, market_baseline: float | None = None,
-              low_30d_all_sources: float | None = None, market_sample_count: int = 0) -> Deal:
-    limit = cfg.ram_max_price if c.kind == "ram" else cfg.gpu_max_price
+              low_30d_all_sources: float | None = None, market_sample_count: int = 0,
+              limit: float | None = None) -> Deal:
+    if limit is None:
+        limit = cfg.ram_max_price if c.kind == "ram" else cfg.gpu_price_ceiling(cl.identity_label)
     ratio = c.price / limit
     score = 55 + max(0, min(30, int((1 - ratio) * 100))) + max(0, (cl.confidence - 85) // 2)
     if c.condition.lower() == "new":

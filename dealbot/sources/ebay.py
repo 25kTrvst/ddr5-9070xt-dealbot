@@ -51,7 +51,7 @@ class EbaySource(Source):
     async def search(self, kind: Kind) -> list[Candidate]:
         if not self.configured:
             return []
-        queries = self.cfg.ram_queries if kind == "ram" else (self.cfg.gpu_query,)
+        queries = self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries
         category = self.cfg.ebay_ram_category_id if kind == "ram" else self.cfg.ebay_gpu_category_id
         ceiling = self.cfg.ram_max_price if kind == "ram" else self.cfg.gpu_max_price
         headers = await self._headers()

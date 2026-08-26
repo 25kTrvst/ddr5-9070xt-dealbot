@@ -42,7 +42,7 @@ class DealBot(commands.Bot):
             color = discord.Color.green()
         else:
             color = discord.Color.gold()
-        label = "RX 9070 XT" if deal.kind == "gpu" else f"{cl.capacity_gb}GB DDR5 {cl.speed_mts} MT/s"
+        label = cl.identity_label if deal.kind == "gpu" else f"{cl.capacity_gb}GB DDR5 {cl.speed_mts} MT/s"
         icon = "⚠️" if deal.unconfirmed else ("✅" if deal.score >= 78 else "👀")
         embed = discord.Embed(title=f"{icon} {label} — {deal.recommendation}", description=c.title[:4000], url=c.url, color=color)
         embed.add_field(name="Price", value=f"${c.price:.2f}", inline=True)

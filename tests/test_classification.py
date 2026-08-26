@@ -95,3 +95,23 @@ def test_capacity_not_in_configured_list_is_rejected():
     cfg = Config(discord_token="test", ram_capacities_gb=(32,))
     c = item("ram", "Corsair 64GB (2x32GB) DDR5 6000MHz DIMM memory kit", 220)
     assert not classify(c, cfg).accepted
+
+
+def test_second_gpu_model_disabled_by_default():
+    c = item("gpu", "Sapphire Nitro+ AMD Radeon RX 7900 XTX 24GB GDDR6 Graphics Card", 650, condition="new")
+    assert not classify(c, CFG).accepted
+
+
+def test_second_gpu_model_accepted_when_enabled_with_its_own_price_ceiling():
+    cfg = Config(discord_token="test", gpu2_enabled=True, gpu2_label="RX 7900 XTX", gpu2_max_price=700)
+    c = item("gpu", "Sapphire Nitro+ AMD Radeon RX 7900 XTX 24GB GDDR6 Graphics Card", 650, condition="new")
+    result = classify(c, cfg)
+    assert result.accepted and result.identity_label == "RX 7900 XTX" and result.capacity_gb == 24
+    assert cfg.gpu_price_ceiling("RX 7900 XTX") == 700
+    assert cfg.gpu_price_ceiling("RX 9070 XT") == cfg.gpu_max_price
+
+
+def test_9070_xt_still_works_and_gre_still_rejected_with_second_gpu_enabled():
+    cfg = Config(discord_token="test", gpu2_enabled=True)
+    assert classify(item("gpu", "XFX Radeon RX 9070 XT 16GB GDDR6 Graphics Card", 549.99, condition="new"), cfg).accepted
+    assert not classify(item("gpu", "AMD Radeon RX 9070 GRE 16GB Graphics Card", 499, condition="new"), cfg).accepted

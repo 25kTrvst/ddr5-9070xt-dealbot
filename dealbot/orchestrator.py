@@ -118,8 +118,11 @@ class Engine:
 
     async def process(self, c: Candidate, emit: bool = True) -> Deal | None:
         if not c.url or await self.storage.is_ignored(c.url): return None
-        limit = self.cfg.ram_max_price if c.kind == "ram" else self.cfg.gpu_max_price
-        if c.source == "eBay" and c.price < limit * self.cfg.unusual_price_ratio and c.metadata.get("price_surface") != "item API":
+        # Before identity is known, use the most permissive ceiling across every
+        # tracked model just to decide whether a price looks cheap enough to
+        # double-check; the real per-model ceiling is resolved after classify().
+        precheck_limit = self.cfg.ram_max_price if c.kind == "ram" else self.cfg.gpu_precheck_ceiling
+        if c.source == "eBay" and c.price < precheck_limit * self.cfg.unusual_price_ratio and c.metadata.get("price_surface") != "item API":
             detailed = await self.ebay.get_item(c.source_id, c.kind)
             if detailed and abs(detailed.price - c.price) <= max(1.0, c.price * self.cfg.corroboration_tolerance_percent / 100):
                 detailed.metadata["price_verification_count"] = 2
@@ -127,6 +130,7 @@ class Engine:
                 c = detailed
         cl = classify(c, self.cfg)
         if not cl.accepted or cl.confidence < self.cfg.minimum_identity_confidence: return None
+        limit = self.cfg.ram_max_price if c.kind == "ram" else self.cfg.gpu_price_ceiling(cl.identity_label)
         if c.price > limit: return None
         observations, previous, low, should_alert = await self.storage.record(c, cl, self.cfg.watchlist_interval_seconds)
         unconfirmed = False
@@ -140,7 +144,7 @@ class Engine:
         if not should_alert: return None
         sold = await self.storage.sold_prices(cl.model_key, self.cfg.sold_comps_file)
         baseline, low_all, sample_count = await self.storage.market_baseline(c.kind, cl.model_key)
-        deal = make_deal(c, cl, self.cfg, observations, previous, low, sold, baseline, low_all, sample_count)
+        deal = make_deal(c, cl, self.cfg, observations, previous, low, sold, baseline, low_all, sample_count, limit)
         if unconfirmed:
             deal.unconfirmed = True
             deal.recommendation = "UNCONFIRMED — VERIFY BEFORE BUYING"

@@ -36,7 +36,7 @@ class RetailerSource(Source):
         return await self.browser.fetch(url, self.cfg.browser_timeout_seconds)
 
     async def search(self, kind: Kind) -> list[Candidate]:
-        queries = self.cfg.ram_queries if kind == "ram" else (self.cfg.gpu_query,)
+        queries = self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries
         # One shared budget for both search-page and detail-page requests to this
         # store, so parallelizing the per-speed RAM search doesn't raise the total
         # number of simultaneous requests a store sees beyond STORE_CONCURRENCY.

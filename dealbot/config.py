@@ -69,6 +69,7 @@ class Config:
 
     ram_query: str = field(default_factory=lambda: os.getenv("RAM_QUERY", "32GB DDR5 desktop memory 6000MHz"))
     gpu_query: str = field(default_factory=lambda: os.getenv("GPU_QUERY", "RX 9070 XT graphics card"))
+    gpu_queries: tuple[str, ...] = field(default_factory=tuple)
     ram_speeds: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_SPEEDS", [5000, 5200, 5600, 6000, 6400])))
     ram_capacities_gb: tuple[int, ...] = field(default_factory=lambda: tuple(env_int_list("RAM_CAPACITIES_GB", [32])))
     ram_query_template: str = field(default_factory=lambda: os.getenv("RAM_QUERY_TEMPLATE", "{capacity}GB DDR5 desktop memory {speed}MHz"))
@@ -79,6 +80,15 @@ class Config:
     gpu_max_price: float = field(default_factory=lambda: env_float("GPU_MAX_PRICE", 600, 1))
     gpu_great_price: float = field(default_factory=lambda: env_float("GPU_GREAT_PRICE", 550, 1))
     gpu_hot_price: float = field(default_factory=lambda: env_float("GPU_HOT_PRICE", 500, 1))
+
+    # A second GPU model to track alongside the RX 9070 XT, with its own price
+    # ceiling (different cards are worth very different amounts, so they can't
+    # share one ceiling the way RAM speeds/capacities do).
+    gpu2_enabled: bool = field(default_factory=lambda: env_bool("GPU2_ENABLED", False))
+    gpu2_label: str = field(default_factory=lambda: os.getenv("GPU2_LABEL", "RX 7900 XTX").strip())
+    gpu2_query: str = field(default_factory=lambda: os.getenv("GPU2_QUERY", "RX 7900 XTX graphics card").strip())
+    gpu2_max_price: float = field(default_factory=lambda: env_float("GPU2_MAX_PRICE", 700, 1))
+
     ram_min_speed: int = field(default_factory=lambda: env_int("RAM_MIN_SPEED_MT_S", 5000, 5000, 10000))
     desktop_only: bool = field(default_factory=lambda: env_bool("RAM_DESKTOP_ONLY", True))
     tax_rate_percent: float = field(default_factory=lambda: env_float("TAX_RATE_PERCENT", 6.625, 0))
@@ -160,6 +170,19 @@ class Config:
         self.ram_queries = tuple(
             self.ram_query_template.format(capacity=c, speed=s) for c in capacities for s in speeds
         )
+        self.gpu_queries = (self.gpu_query, self.gpu2_query) if self.gpu2_enabled else (self.gpu_query,)
+
+    @property
+    def gpu_precheck_ceiling(self) -> float:
+        """The most permissive GPU ceiling across every tracked model, used
+        only to decide whether a price looks cheap enough to double-check
+        before we know which specific model a listing is."""
+        return max(self.gpu_max_price, self.gpu2_max_price) if self.gpu2_enabled else self.gpu_max_price
+
+    def gpu_price_ceiling(self, identity_label: str) -> float:
+        if self.gpu2_enabled and identity_label == self.gpu2_label:
+            return self.gpu2_max_price
+        return self.gpu_max_price
 
     def validate(self) -> list[str]:
         issues: list[str] = []
