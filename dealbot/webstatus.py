@@ -2,10 +2,28 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .config import Config
+
+_HARMLESS_ERRORS = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
+
+class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """A browser opening then abruptly closing a connection (a cancelled
+    request, a speculative preconnect, favicon probes, etc.) is normal and
+    harmless, but Python's http.server prints a full traceback for it by
+    default - which looks like a crash in the console even though nothing
+    is actually broken. Only print tracebacks for genuinely unexpected
+    errors."""
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, _HARMLESS_ERRORS):
+            return
+        super().handle_error(request, client_address)
 
 PAGE = """<!doctype html>
 <html>
@@ -108,12 +126,12 @@ class StatusWebServer:
 
     def __init__(self, cfg: Config, engine) -> None:
         self.cfg, self.engine = cfg, engine
-        self._server: ThreadingHTTPServer | None = None
+        self._server: _QuietThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         handler = _make_handler(self.cfg, self.engine)
-        self._server = ThreadingHTTPServer(("127.0.0.1", self.cfg.status_web_port), handler)
+        self._server = _QuietThreadingHTTPServer(("127.0.0.1", self.cfg.status_web_port), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, name="status-web", daemon=True)
         self._thread.start()
 
