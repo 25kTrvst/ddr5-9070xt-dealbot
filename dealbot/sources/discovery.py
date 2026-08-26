@@ -25,11 +25,13 @@ class Lead:
     url: str
 
 
-def kind_from_text(text: str) -> Kind | None:
+def kind_from_text(text: str, cfg: Config) -> Kind | None:
     low = text.lower()
     if re.search(r"\b(?:rx|radeon)\s*9070\s*xt\b", low) and not re.search(r"\b9070\s*gre\b", low):
         return "gpu"
-    if "ddr5" in low and re.search(r"\b32\s*gb\b", low):
+    if cfg.gpu2_enabled and re.search(r"\b(?:rx|radeon)\s*[- ]?7900\s*xtx\b", low):
+        return "gpu"
+    if "ddr5" in low and any(re.search(rf"\b{c}\s*gb\b", low) for c in cfg.ram_capacities_gb):
         return "ram"
     return None
 
@@ -60,7 +62,7 @@ class RedditDiscovery:
             r = await self.client.get(f"https://oauth.reddit.com/r/{sub}/new", headers=headers, params={"limit": 50, "raw_json": 1})
             r.raise_for_status()
             for child in r.json().get("data", {}).get("children", []):
-                p = child.get("data", {}); kind = kind_from_text(str(p.get("title", "")))
+                p = child.get("data", {}); kind = kind_from_text(str(p.get("title", "")), self.cfg)
                 url = str(p.get("url_overridden_by_dest", p.get("url", "")))
                 if kind and url.startswith("http"): out.append(Lead(f"Reddit r/{sub}", kind, str(p.get("title", "")), url))
         return out
@@ -76,7 +78,7 @@ class SlickdealsDiscovery:
         feed = await asyncio.to_thread(feedparser.parse, self.cfg.slickdeals_feed_url)
         out: list[Lead] = []
         for e in feed.entries[:100]:
-            kind = kind_from_text(str(e.get("title", "")))
+            kind = kind_from_text(str(e.get("title", "")), self.cfg)
             if kind and str(e.get("link", "")).startswith("http"):
                 out.append(Lead(self.name, kind, str(e.get("title", "")), str(e.get("link", ""))))
         return out
@@ -101,7 +103,7 @@ class ZohoDiscovery:
                     if part.get_content_type() in {"text/plain", "text/html"}:
                         try: body += part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "ignore")
                         except Exception: pass
-                kind = kind_from_text(subject + " " + body)
+                kind = kind_from_text(subject + " " + body, self.cfg)
                 if kind:
                     for url in self.URL_RE.findall(body):
                         if urlparse(url).scheme in {"http", "https"}: out.append(Lead(self.name, kind, subject, url.rstrip(".,)")))
