@@ -259,4 +259,10 @@ STORES: tuple[StoreConfig, ...] = (
         ("shopblt.com", "www.shopblt.com"),
         SLOW_INTERVAL_SECONDS,  # no track record yet; starts cautious
     ),
+    StoreConfig(
+        "Walmart",
+        "https://www.walmart.com/search?q={query}",
+        ("walmart.com", "www.walmart.com"),
+        SLOW_INTERVAL_SECONDS,  # heavily bot-protected; start cautious
+    ),
 )

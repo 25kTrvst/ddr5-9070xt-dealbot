@@ -10,6 +10,7 @@ from .microcenter import MicroCenterParser
 from .newegg import NeweggParser
 from .provantage import ProvantageParser
 from .shopblt import ShopBLTParser
+from .walmart import WalmartParser
 
 _PARSERS: dict[str, type[StoreParser]] = {
     "Newegg": NeweggParser,
@@ -21,6 +22,7 @@ _PARSERS: dict[str, type[StoreParser]] = {
     "Antonline": AntonlineParser,
     "Provantage": ProvantageParser,
     "ShopBLT": ShopBLTParser,
+    "Walmart": WalmartParser,
 }
 
 
