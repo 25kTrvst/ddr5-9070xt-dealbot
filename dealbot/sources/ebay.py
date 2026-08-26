@@ -9,7 +9,7 @@ import httpx
 
 from ..config import Config
 from ..models import Candidate, Kind
-from .base import Source, SourceError, money
+from .base import QueryRotation, Source, SourceError, money
 
 
 class EbaySource(Source):
@@ -20,6 +20,7 @@ class EbaySource(Source):
         self._token = ""
         self._expires = 0.0
         self._lock = asyncio.Lock()
+        self._rotation = QueryRotation()
 
     @property
     def configured(self) -> bool:
@@ -51,7 +52,7 @@ class EbaySource(Source):
     async def search(self, kind: Kind) -> list[Candidate]:
         if not self.configured:
             return []
-        queries = self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries
+        queries = self._rotation.next(self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries)
         category = self.cfg.ebay_ram_category_id if kind == "ram" else self.cfg.ebay_gpu_category_id
         ceiling = self.cfg.ram_max_price if kind == "ram" else self.cfg.gpu_max_price
         headers = await self._headers()

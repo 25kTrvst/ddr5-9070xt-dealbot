@@ -7,10 +7,11 @@ from urllib.parse import quote_plus
 import httpx
 from bs4 import BeautifulSoup
 
+from .. import __version__
 from ..browser import BrowserManager
 from ..config import Config, StoreConfig
 from ..models import Candidate, Kind
-from .base import BlockedSource, Source, SourceError
+from .base import BlockedSource, QueryRotation, Source, SourceError
 from .parsers import get_parser
 
 
@@ -18,9 +19,10 @@ class RetailerSource(Source):
     def __init__(self, cfg: Config, store: StoreConfig, client: httpx.AsyncClient, browser: BrowserManager):
         self.cfg, self.store, self.client, self.browser, self.name = cfg, store, client, browser, store.name
         self.parser = get_parser(store.name)
+        self._rotation = QueryRotation()
 
     async def _get(self, url: str) -> str:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; DealBot/6.0; personal price monitor)"}
+        headers = {"User-Agent": f"Mozilla/5.0 (compatible; DealBot/{__version__}; personal price monitor)"}
         if self.name == "Micro Center" and self.cfg.microcenter_store_id:
             headers["Cookie"] = f"storeSelected={self.cfg.microcenter_store_id}"
         r = await self.client.get(url, headers=headers, follow_redirects=True)
@@ -36,17 +38,25 @@ class RetailerSource(Source):
         return await self.browser.fetch(url, self.cfg.browser_timeout_seconds)
 
     async def search(self, kind: Kind) -> list[Candidate]:
-        queries = self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries
+        all_queries = self.cfg.ram_queries if kind == "ram" else self.cfg.gpu_queries
+        # Checking every configured speed/capacity combo on every single cycle
+        # multiplies this store's request volume by however many combos are
+        # configured; rotate through them instead so the full set is covered
+        # over successive cycles rather than every one.
+        queries = self._rotation.next(all_queries)
+        template = self.store.search_url_gpu if (kind == "gpu" and self.store.search_url_gpu) else self.store.search_url
         # One shared budget for both search-page and detail-page requests to this
         # store, so parallelizing the per-speed RAM search doesn't raise the total
         # number of simultaneous requests a store sees beyond STORE_CONCURRENCY.
         limiter = asyncio.Semaphore(self.cfg.store_concurrency)
 
         async def collect(query: str) -> list[str]:
-            search_url = self.store.search_url.format(query=quote_plus(query))
+            search_url = template.format(query=quote_plus(query))
             try:
                 async with limiter:
                     return await self._collect_links(search_url)
+            except BlockedSource:
+                raise  # a block means the whole store, not just this query - let it propagate
             except (SourceError, httpx.HTTPError):
                 return []
 
@@ -61,6 +71,8 @@ class RetailerSource(Source):
             try:
                 async with limiter:
                     return await self.verify_url(product_url, kind)
+            except BlockedSource:
+                raise  # same as above - a block must reach scan_source()'s backoff handling
             except (SourceError, httpx.HTTPError):
                 return None
 

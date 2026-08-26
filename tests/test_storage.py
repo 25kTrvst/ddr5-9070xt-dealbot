@@ -20,6 +20,20 @@ async def test_market_baseline_aggregates_across_stores(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_market_baseline_counts_distinct_stores_not_observation_rows(tmp_path: Path):
+    # Repeated checks of the SAME Newegg listing must not read as "3 sources".
+    storage = Storage(tmp_path / "test.sqlite3")
+    await storage.initialize()
+    cl = _fake_classification()
+    for price in [150.0, 148.0, 146.0]:
+        c = Candidate("Newegg", "1", "ram", "Corsair Vengeance 32GB DDR5 6000MHz", "https://x/1", price)
+        await storage.record(c, cl, 120)
+
+    _, _, count = await storage.market_baseline("ram", cl.model_key)
+    assert count == 1
+
+
+@pytest.mark.asyncio
 async def test_restock_at_same_price_still_alerts(tmp_path: Path):
     storage = Storage(tmp_path / "test.sqlite3")
     await storage.initialize()

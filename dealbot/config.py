@@ -58,6 +58,10 @@ class StoreConfig:
     search_url: str
     domains: tuple[str, ...]
     interval_seconds: int = 600
+    # Only needed for a store whose search URL is itself category-locked
+    # (e.g. Provantage's RAM-only "SEC=~CRAMM" search service) - when set,
+    # GPU searches use this URL instead of search_url.
+    search_url_gpu: str | None = None
 
 
 @dataclass(slots=True)
@@ -249,6 +253,10 @@ STORES: tuple[StoreConfig, ...] = (
     ),
     StoreConfig(
         "Provantage",
+        # KNOWN ISSUE: SEC=~CRAMM looks like a category code (likely "computer
+        # RAM"), which would silently scope every search - including GPU
+        # searches - to RAM inventory only. Needs a real Provantage search URL
+        # for "RX 9070 XT" to fill in search_url_gpu below and confirm/fix.
         "https://www.provantage.com/service/searchsvcs?SEC=%7ECRAMM&QUERY={query}&SUBMIT.x=0&SUBMIT.y=0",
         ("provantage.com", "www.provantage.com"),
         SLOW_INTERVAL_SECONDS,  # no track record yet; starts cautious

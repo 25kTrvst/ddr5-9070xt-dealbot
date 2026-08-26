@@ -129,21 +129,25 @@ class Storage:
     async def market_baseline(self, kind: str, model_key: str, days: int = 30) -> tuple[float | None, float | None, int]:
         """Genuine cross-store market baseline and 30-day low for the exact
         model, built from every store/source that has ever verified it —
-        not just the single listing being evaluated."""
+        not just the single listing being evaluated. The returned count is
+        distinct stores, not raw observation rows — three price checks on
+        the same Newegg listing must not read as "3 sources"."""
         if not model_key:
             return None, None, 0
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute(
-                """SELECT o.price FROM observations o
+                """SELECT o.price, o.source FROM observations o
                    JOIN listings l ON o.source=l.source AND o.source_id=l.source_id
                    WHERE l.kind=? AND l.model_key=? AND o.observed_at>=?""",
                 (kind, model_key, since),
             )
-            prices = [row[0] for row in await cur.fetchall()]
-        if not prices:
+            rows = await cur.fetchall()
+        if not rows:
             return None, None, 0
-        return round(median(prices), 2), round(min(prices), 2), len(prices)
+        prices = [row[0] for row in rows]
+        distinct_sources = len({row[1] for row in rows})
+        return round(median(prices), 2), round(min(prices), 2), distinct_sources
 
     async def price_history(self, kind: str, model_key: str, days: int) -> list[tuple[str, float]]:
         """Timestamped price points for the exact model across every store,

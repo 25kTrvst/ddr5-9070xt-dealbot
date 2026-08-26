@@ -36,6 +36,7 @@ class Engine:
         self.discovery = [RedditDiscovery(cfg, self.client), SlickdealsDiscovery(cfg), ZohoDiscovery(cfg)]
         self.tasks: list[asyncio.Task] = []; self._locks = defaultdict(lambda: asyncio.Semaphore(cfg.store_concurrency))
         self._blocked_until: dict[str, datetime] = {}; self.last_scans: dict[str, str] = {}
+        self._not_found_counts: dict[tuple[str, str], int] = {}
         self.web = StatusWebServer(cfg, self) if cfg.status_web_enabled else None
 
     async def start(self) -> None:
@@ -174,6 +175,7 @@ class Engine:
                 rows.append(row)
 
             async def verify(row: dict[str, str]) -> Candidate | None:
+                key = (row["source"], row["source_id"])
                 async with limiter:
                     try:
                         c = await self._verify_watch_row(row)
@@ -184,7 +186,16 @@ class Engine:
                         # returning it with a stock status, so record it as out
                         # of stock ourselves; a later successful re-check at the
                         # same source/source_id is then recognized as a restock.
-                        await self.storage.mark_out_of_stock(row["source"], row["source_id"])
+                        # Require two consecutive not-found results first - a
+                        # one-off API blip (empty page, momentary availability
+                        # flag glitch) shouldn't be enough to later fire a false
+                        # restock alert once the API is back to normal.
+                        misses = self._not_found_counts.get(key, 0) + 1
+                        self._not_found_counts[key] = misses
+                        if misses >= 2:
+                            await self.storage.mark_out_of_stock(row["source"], row["source_id"])
+                    else:
+                        self._not_found_counts.pop(key, None)
                     return c
 
             # Verifying due rows is the slow, network-bound part; run them
