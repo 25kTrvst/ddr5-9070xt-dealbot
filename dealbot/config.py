@@ -247,4 +247,16 @@ STORES: tuple[StoreConfig, ...] = (
         ("antonline.com", "www.antonline.com", "node-4.antonline.com"),
         SLOW_INTERVAL_SECONDS,
     ),
+    StoreConfig(
+        "Provantage",
+        "https://www.provantage.com/service/searchsvcs?SEC=%7ECRAMM&QUERY={query}&SUBMIT.x=0&SUBMIT.y=0",
+        ("provantage.com", "www.provantage.com"),
+        SLOW_INTERVAL_SECONDS,  # no track record yet; starts cautious
+    ),
+    StoreConfig(
+        "ShopBLT",
+        "https://www.shopblt.com/search/order_id=258602080&s_max=25&t_all=1&s_all={query}&search=Search",
+        ("shopblt.com", "www.shopblt.com"),
+        SLOW_INTERVAL_SECONDS,  # no track record yet; starts cautious
+    ),
 )

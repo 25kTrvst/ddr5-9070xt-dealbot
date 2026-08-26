@@ -8,6 +8,8 @@ from .bh import BHPhotoParser
 from .central_computers import CentralComputersParser
 from .microcenter import MicroCenterParser
 from .newegg import NeweggParser
+from .provantage import ProvantageParser
+from .shopblt import ShopBLTParser
 
 _PARSERS: dict[str, type[StoreParser]] = {
     "Newegg": NeweggParser,
@@ -17,6 +19,8 @@ _PARSERS: dict[str, type[StoreParser]] = {
     "Adorama": AdoramaParser,
     "Central Computers": CentralComputersParser,
     "Antonline": AntonlineParser,
+    "Provantage": ProvantageParser,
+    "ShopBLT": ShopBLTParser,
 }
 
 
