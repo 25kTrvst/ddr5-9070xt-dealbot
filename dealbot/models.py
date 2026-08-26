@@ -67,6 +67,7 @@ class Deal:
     low_30d_all_sources: float | None = None
     market_sample_count: int = 0
     unconfirmed: bool = False
+    restocked: bool = False
 
     @property
     def kind(self) -> Kind:

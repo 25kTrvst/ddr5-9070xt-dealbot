@@ -20,6 +20,26 @@ async def test_market_baseline_aggregates_across_stores(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_restock_at_same_price_still_alerts(tmp_path: Path):
+    storage = Storage(tmp_path / "test.sqlite3")
+    await storage.initialize()
+    cl = _fake_classification()
+
+    c1 = Candidate("Newegg", "1", "ram", "Patriot Viper 32GB DDR5 6000MHz", "https://x/1", 120, stock="in stock")
+    _, _, _, should_alert, restocked = await storage.record(c1, cl, 120)
+    assert should_alert and not restocked
+    await storage.mark_alerted(c1)
+
+    c2 = Candidate("Newegg", "1", "ram", "Patriot Viper 32GB DDR5 6000MHz", "https://x/1", 120, stock="out of stock")
+    _, _, _, should_alert, restocked = await storage.record(c2, cl, 120)
+    assert not should_alert and not restocked  # going out of stock is never itself alert-worthy
+
+    c3 = Candidate("Newegg", "1", "ram", "Patriot Viper 32GB DDR5 6000MHz", "https://x/1", 120, stock="in stock")
+    _, _, _, should_alert, restocked = await storage.record(c3, cl, 120)
+    assert should_alert and restocked  # same price as before, but a genuine restock
+
+
+@pytest.mark.asyncio
 async def test_price_history_returns_oldest_first_across_stores(tmp_path: Path):
     storage = Storage(tmp_path / "test.sqlite3")
     await storage.initialize()

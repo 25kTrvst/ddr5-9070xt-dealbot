@@ -36,36 +36,54 @@ class Storage:
             CREATE INDEX IF NOT EXISTS idx_watch_due ON watchlist(next_check);
             CREATE INDEX IF NOT EXISTS idx_listings_model ON listings(kind, model_key);
             """)
+            try:
+                await db.execute("ALTER TABLE listings ADD COLUMN last_stock TEXT")
+            except aiosqlite.OperationalError:
+                pass  # already migrated on an existing database
             await db.commit()
 
-    async def record(self, c: Candidate, cl: Classification, watch_seconds: int) -> tuple[int, float | None, float | None, bool]:
+    async def record(self, c: Candidate, cl: Classification, watch_seconds: int) -> tuple[int, float | None, float | None, bool, bool]:
         now = datetime.now(timezone.utc)
         next_check = (now + timedelta(seconds=watch_seconds)).isoformat()
         async with aiosqlite.connect(self.path) as db:
-            cur = await db.execute("SELECT last_price,last_alert_price FROM listings WHERE source=? AND source_id=?", (c.source, c.source_id))
+            cur = await db.execute("SELECT last_price,last_alert_price,last_stock FROM listings WHERE source=? AND source_id=?", (c.source, c.source_id))
             old = await cur.fetchone()
             cur = await db.execute("SELECT COUNT(*),MIN(price) FROM observations WHERE source=? AND source_id=? AND observed_at>=?", (c.source, c.source_id, (now-timedelta(days=30)).isoformat()))
             count, low = await cur.fetchone()
             previous = old[0] if old else None
             sku = str(c.metadata.get("sku", ""))
             upc = str(c.metadata.get("upc", ""))
-            await db.execute("""INSERT INTO listings(source,source_id,kind,title,url,model_key,sku,upc,last_price,last_seen,last_alert_price)
-              VALUES(?,?,?,?,?,?,?,?,?,?,NULL)
+            await db.execute("""INSERT INTO listings(source,source_id,kind,title,url,model_key,sku,upc,last_price,last_seen,last_alert_price,last_stock)
+              VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)
               ON CONFLICT(source,source_id) DO UPDATE SET title=excluded.title,url=excluded.url,model_key=excluded.model_key,
-              sku=excluded.sku,upc=excluded.upc,last_price=excluded.last_price,last_seen=excluded.last_seen""",
-              (c.source,c.source_id,c.kind,c.title,c.url,cl.model_key,sku,upc,c.price,now.isoformat()))
+              sku=excluded.sku,upc=excluded.upc,last_price=excluded.last_price,last_seen=excluded.last_seen,last_stock=excluded.last_stock""",
+              (c.source,c.source_id,c.kind,c.title,c.url,cl.model_key,sku,upc,c.price,now.isoformat(),c.stock))
             await db.execute("INSERT INTO observations VALUES(?,?,?,?,?,?,?)", (c.source,c.source_id,now.isoformat(),c.price,c.shipping,c.stock,c.condition))
             await db.execute("""INSERT INTO watchlist VALUES(?,?,?,?,?,?,?,?,0)
               ON CONFLICT(url) DO UPDATE SET source=excluded.source,source_id=excluded.source_id,kind=excluded.kind,
               model_key=excluded.model_key,sku=excluded.sku,upc=excluded.upc,next_check=excluded.next_check,failures=0""",
               (c.url,c.source,c.source_id,c.kind,cl.model_key,sku,upc,next_check))
             await db.commit()
-        new_or_drop = old is None or (old[1] is None) or c.price <= float(old[1]) - 5
-        return int(count), previous, low, new_or_drop
+        old_alert_price = old[1] if old else None
+        old_stock = str(old[2]).lower() if old and old[2] else ""
+        restocked = old_stock == "out of stock" and c.stock.lower() == "in stock"
+        available = c.stock.lower() != "out of stock"
+        price_drop_or_new = old is None or old_alert_price is None or c.price <= float(old_alert_price) - 5
+        should_alert = restocked or (available and price_drop_or_new)
+        return int(count), previous, low, should_alert, restocked
 
     async def mark_alerted(self, c: Candidate) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute("UPDATE listings SET last_alert_price=? WHERE source=? AND source_id=?", (c.price,c.source,c.source_id))
+            await db.commit()
+
+    async def mark_out_of_stock(self, source: str, source_id: str) -> None:
+        """For APIs (eBay/Best Buy) that simply omit unavailable items instead
+        of returning them with a stock status: when a watched item can no
+        longer be found, record it as out of stock so a later restock at the
+        same source/source_id is detected as a genuine restock."""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("UPDATE listings SET last_stock='out of stock' WHERE source=? AND source_id=?", (source, source_id))
             await db.commit()
 
     async def due_watchlist(self, limit: int = 100) -> list[dict[str, str]]:

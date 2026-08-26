@@ -40,10 +40,12 @@ class DealBot(commands.Bot):
             color = discord.Color.red()
         elif deal.recommendation.startswith("BUY"):
             color = discord.Color.green()
+        elif deal.restocked:
+            color = discord.Color.blue()
         else:
             color = discord.Color.gold()
         label = cl.identity_label if deal.kind == "gpu" else f"{cl.capacity_gb}GB DDR5 {cl.speed_mts} MT/s"
-        icon = "⚠️" if deal.unconfirmed else ("✅" if deal.score >= 78 else "👀")
+        icon = "⚠️" if deal.unconfirmed else ("🔄" if deal.restocked else ("✅" if deal.score >= 78 else "👀"))
         embed = discord.Embed(title=f"{icon} {label} — {deal.recommendation}", description=c.title[:4000], url=c.url, color=color)
         embed.add_field(name="Price", value=f"${c.price:.2f}", inline=True)
         embed.add_field(name="Estimated checkout", value=f"${deal.estimated_total:.2f}", inline=True)
@@ -59,6 +61,8 @@ class DealBot(commands.Bot):
             embed.add_field(name="eBay seller quality", value=f"{c.seller_feedback_score:,} feedback • {c.seller_feedback_percent:.1f}% positive", inline=False)
         if deal.unconfirmed:
             embed.add_field(name="⚠️ Unconfirmed price", value="Far below the normal range and seen on only one price surface so far. Double-check the listing yourself before buying.", inline=False)
+        if deal.restocked:
+            embed.add_field(name="🔄 Back in stock", value="This exact listing was out of stock and just became available again.", inline=False)
         embed.add_field(name="Why", value=deal.recommendation_reason[:1024], inline=False)
         embed.add_field(name="Verification", value=" • ".join(cl.reasons)[:1024], inline=False)
         embed.set_footer(text="DealBot V6 • exact identity gates • verified price • persistent SKU watchlist")

@@ -65,8 +65,11 @@ class StoreParser:
                 price = money(offers.get("price", product.price))
                 if price is not None:
                     product.price = price
-                if "instock" in str(offers.get("availability", "")).lower():
+                availability = str(offers.get("availability", "")).lower()
+                if "instock" in availability:
                     product.stock = "in stock"
+                elif any(x in availability for x in ("outofstock", "soldout", "discontinued", "backorder")):
+                    product.stock = "out of stock"
                 if "new" in str(offers.get("itemCondition", "")).lower():
                     product.condition = "new"
         product.title = product.title or (soup.title.get_text(" ", strip=True) if soup.title else "")

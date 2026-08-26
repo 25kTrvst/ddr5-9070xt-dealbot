@@ -132,7 +132,7 @@ class Engine:
         if not cl.accepted or cl.confidence < self.cfg.minimum_identity_confidence: return None
         limit = self.cfg.ram_max_price if c.kind == "ram" else self.cfg.gpu_price_ceiling(cl.identity_label)
         if c.price > limit: return None
-        observations, previous, low, should_alert = await self.storage.record(c, cl, self.cfg.watchlist_interval_seconds)
+        observations, previous, low, should_alert, restocked = await self.storage.record(c, cl, self.cfg.watchlist_interval_seconds)
         unconfirmed = False
         if c.price < limit * self.cfg.unusual_price_ratio:
             matches = await self.storage.corroborating_sources(c.kind, cl.model_key, c.price, self.cfg.corroboration_tolerance_percent, c.source)
@@ -145,12 +145,17 @@ class Engine:
         sold = await self.storage.sold_prices(cl.model_key, self.cfg.sold_comps_file)
         baseline, low_all, sample_count = await self.storage.market_baseline(c.kind, cl.model_key)
         deal = make_deal(c, cl, self.cfg, observations, previous, low, sold, baseline, low_all, sample_count, limit)
+        deal.restocked = restocked
         if unconfirmed:
             deal.unconfirmed = True
             deal.recommendation = "UNCONFIRMED — VERIFY BEFORE BUYING"
             deal.recommendation_reason = "Price is far below the normal range and has only been seen once on one source. " + deal.recommendation_reason
         elif deal.recommendation == "WAIT / WATCH":
-            return None
+            if restocked:
+                deal.recommendation = "BACK IN STOCK"
+                deal.recommendation_reason = "This exact listing was out of stock and just became available again. " + deal.recommendation_reason
+            else:
+                return None
         if not emit:
             return None
         await self.on_deal(deal); await self.storage.mark_alerted(c)
@@ -170,9 +175,16 @@ class Engine:
             async def verify(row: dict[str, str]) -> Candidate | None:
                 async with limiter:
                     try:
-                        return await self._verify_watch_row(row)
+                        c = await self._verify_watch_row(row)
                     except Exception:
                         return None
+                    if c is None and row["source"] in {"eBay", "Best Buy"}:
+                        # These APIs simply omit an unavailable item rather than
+                        # returning it with a stock status, so record it as out
+                        # of stock ourselves; a later successful re-check at the
+                        # same source/source_id is then recognized as a restock.
+                        await self.storage.mark_out_of_stock(row["source"], row["source_id"])
+                    return c
 
             # Verifying due rows is the slow, network-bound part; run them
             # concurrently instead of one at a time. Alerting stays sequential
