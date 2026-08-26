@@ -209,7 +209,7 @@ STORES: tuple[StoreConfig, ...] = (
         "Newegg",
         "https://www.newegg.com/p/pl?d={query}",
         ("newegg.com", "www.newegg.com"),
-        FAST_INTERVAL_SECONDS,
+        180,  # no observed blocking; sped up further than the other fast-tier stores on request
     ),
     StoreConfig(
         "Best Buy page",
