@@ -126,3 +126,17 @@ def test_16gb_kit_is_tracked_by_default_alongside_32gb():
 def test_expanded_ram_brand_list_recognizes_sub_brand_names():
     c = item("ram", "HyperX Fury 32GB (2x16GB) DDR5 6000MHz DIMM Desktop Memory", 130, condition="new")
     assert classify(c, CFG).accepted
+
+
+def test_second_slickdeals_feed_slot_is_optional_and_additive():
+    from dealbot.sources.discovery import SlickdealsDiscovery
+
+    cfg_none = Config(discord_token="test")
+    assert not SlickdealsDiscovery(cfg_none).configured
+
+    cfg_one = Config(discord_token="test", slickdeals_feed_url="https://example.com/a")
+    assert cfg_one.slickdeals_feed_urls == ("https://example.com/a",)
+
+    cfg_two = Config(discord_token="test", slickdeals_feed_url="https://example.com/a", slickdeals_feed_url_2="https://example.com/b")
+    assert cfg_two.slickdeals_feed_urls == ("https://example.com/a", "https://example.com/b")
+    assert SlickdealsDiscovery(cfg_two).configured

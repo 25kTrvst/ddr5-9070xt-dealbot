@@ -34,7 +34,7 @@ Copy `.env.example` to `.env` if migration did not find your V5 settings. Keep `
 ### Optional discovery
 
 - **Reddit:** approved Data API Client ID, Client Secret, and a specific User Agent. Configure multiple communities with `REDDIT_SUBREDDITS`.
-- **Slickdeals:** create an RSS/search alert feed and paste its URL into `SLICKDEALS_FEED_URL`. V6 does not scrape Slickdeals pages.
+- **Slickdeals:** create an RSS/search alert feed and paste its URL into `SLICKDEALS_FEED_URL`; a second feed (e.g. a GPU search) can go in `SLICKDEALS_FEED_URL_2` — both are polled and merged, since each item's own title decides whether it's a RAM or GPU lead. V6 does not scrape Slickdeals pages.
 - **Zoho:** enable IMAP in Zoho, create an app password, and set `ZOHO_IMAP_ENABLED=true`. V6 reads unread deal emails for links but does not store email bodies.
 - **Micro Center:** set `MICROCENTER_STORE_ID` for location-specific pages. A ZIP field is included for future store endpoints.
 

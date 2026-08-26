@@ -72,15 +72,16 @@ class SlickdealsDiscovery:
     name = "Slickdeals"
     def __init__(self, cfg: Config): self.cfg = cfg
     @property
-    def configured(self) -> bool: return bool(self.cfg.slickdeals_feed_url)
+    def configured(self) -> bool: return bool(self.cfg.slickdeals_feed_urls)
     async def discover(self) -> list[Lead]:
         if not self.configured: return []
-        feed = await asyncio.to_thread(feedparser.parse, self.cfg.slickdeals_feed_url)
         out: list[Lead] = []
-        for e in feed.entries[:100]:
-            kind = kind_from_text(str(e.get("title", "")), self.cfg)
-            if kind and str(e.get("link", "")).startswith("http"):
-                out.append(Lead(self.name, kind, str(e.get("title", "")), str(e.get("link", ""))))
+        for url in self.cfg.slickdeals_feed_urls:
+            feed = await asyncio.to_thread(feedparser.parse, url)
+            for e in feed.entries[:100]:
+                kind = kind_from_text(str(e.get("title", "")), self.cfg)
+                if kind and str(e.get("link", "")).startswith("http"):
+                    out.append(Lead(self.name, kind, str(e.get("title", "")), str(e.get("link", ""))))
         return out
 
 

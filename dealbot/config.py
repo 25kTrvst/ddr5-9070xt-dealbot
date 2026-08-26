@@ -115,6 +115,8 @@ class Config:
     reddit_interval_seconds: int = field(default_factory=lambda: env_int("REDDIT_INTERVAL_SECONDS", 90, 60, 1800))
 
     slickdeals_feed_url: str = field(default_factory=lambda: os.getenv("SLICKDEALS_FEED_URL", "").strip())
+    slickdeals_feed_url_2: str = field(default_factory=lambda: os.getenv("SLICKDEALS_FEED_URL_2", "").strip())
+    slickdeals_feed_urls: tuple[str, ...] = field(default_factory=tuple)
     slickdeals_interval_seconds: int = field(default_factory=lambda: env_int("SLICKDEALS_INTERVAL_SECONDS", 90, 60, 1800))
     zoho_imap_enabled: bool = field(default_factory=lambda: env_bool("ZOHO_IMAP_ENABLED", False))
     zoho_imap_host: str = field(default_factory=lambda: os.getenv("ZOHO_IMAP_HOST", "imap.zoho.com").strip())
@@ -171,6 +173,7 @@ class Config:
             self.ram_query_template.format(capacity=c, speed=s) for c in capacities for s in speeds
         )
         self.gpu_queries = (self.gpu_query, self.gpu2_query) if self.gpu2_enabled else (self.gpu_query,)
+        self.slickdeals_feed_urls = tuple(u for u in (self.slickdeals_feed_url, self.slickdeals_feed_url_2) if u)
 
     @property
     def gpu_precheck_ceiling(self) -> float:
