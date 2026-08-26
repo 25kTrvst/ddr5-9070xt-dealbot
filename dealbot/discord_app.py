@@ -96,7 +96,9 @@ class DealBot(commands.Bot):
         api = f"eBay: {'ready' if self.engine.ebay.configured else 'credentials missing'}\nBest Buy: {'ready' if self.engine.bestbuy.configured else 'key missing'}\nReddit: {'ready' if self.engine.discovery[0].configured else 'credentials/approval missing'}\nSlickdeals: {'ready' if self.engine.discovery[1].configured else 'feed URL not configured'}\nZoho: {'ready' if self.engine.discovery[2].configured else 'disabled'}"
         embed = discord.Embed(title="DealBot V6 status", color=discord.Color.blurple())
         embed.add_field(name="Fast lanes", value=f"eBay {self.cfg.ebay_interval_seconds}s • Best Buy {self.cfg.bestbuy_interval_seconds}s • Reddit {self.cfg.reddit_interval_seconds}s", inline=False)
-        embed.add_field(name="Watch/discovery", value=f"Known SKUs {self.cfg.watchlist_interval_seconds}s • store searches {self.cfg.slow_interval_seconds}s • blocks {self.cfg.blocked_backoff_min_seconds//60}–{self.cfg.blocked_backoff_max_seconds//60}m", inline=False)
+        store_intervals = ", ".join(f"{s.store.name} {s.store.interval_seconds}s" for s in self.engine.retailers)
+        embed.add_field(name="Watch/discovery", value=f"Known SKUs {self.cfg.watchlist_interval_seconds}s • blocks {self.cfg.blocked_backoff_min_seconds//60}–{self.cfg.blocked_backoff_max_seconds//60}m", inline=False)
+        embed.add_field(name="Store search speeds", value=store_intervals, inline=False)
         embed.add_field(name="RAM speed tiers searched", value=", ".join(f"{s} MT/s" for s in self.cfg.ram_speeds), inline=False)
         embed.add_field(name="Crash alerts", value=f"Posted to #{self.cfg.ops_channel_name} (falls back to #{self.cfg.gpu_channel_name} or a DM) — a crashed scanner auto-restarts after {CRASH_RESTART_DELAY_SECONDS}s", inline=False)
         embed.add_field(name="Connections", value=api, inline=False)

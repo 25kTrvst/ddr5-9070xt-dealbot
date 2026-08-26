@@ -52,9 +52,10 @@ class Engine:
             interval = self.cfg.reddit_interval_seconds if isinstance(d, RedditDiscovery) else self.cfg.slickdeals_interval_seconds if isinstance(d, SlickdealsDiscovery) else self.cfg.email_interval_seconds
             self.tasks.append(self._spawn(lambda d=d, interval=interval: self._discovery_loop(d, interval), f"{d.name}-discovery"))
         for index, source in enumerate(self.retailers):
-            offset = index * self.cfg.slow_interval_seconds / max(1, len(self.retailers))
+            interval = source.store.interval_seconds
+            offset = index * interval / max(1, len(self.retailers))
             self.tasks.append(self._spawn(
-                lambda source=source, offset=offset: self._source_loop(source, self.cfg.slow_interval_seconds, jitter=180, initial_delay=offset),
+                lambda source=source, interval=interval, offset=offset: self._source_loop(source, interval, jitter=180, initial_delay=offset),
                 f"{source.name}-broad",
             ))
 

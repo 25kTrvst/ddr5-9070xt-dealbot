@@ -57,6 +57,7 @@ class StoreConfig:
     name: str
     search_url: str
     domains: tuple[str, ...]
+    interval_seconds: int = 600
 
 
 @dataclass(slots=True)
@@ -135,8 +136,6 @@ class Config:
     microcenter_store_id: str = field(default_factory=lambda: os.getenv("MICROCENTER_STORE_ID", "").strip())
     microcenter_zip: str = field(default_factory=lambda: os.getenv("MICROCENTER_ZIP", "").strip())
 
-    slow_interval_seconds: int = field(default_factory=lambda: env_int("SLOW_INTERVAL_SECONDS", 600, 300, 3600))
-    slow_stores_per_cycle: int = field(default_factory=lambda: env_int("SLOW_STORES_PER_CYCLE", 2, 1, 6))
     http_timeout_seconds: int = field(default_factory=lambda: env_int("HTTP_TIMEOUT_SECONDS", 15, 5, 60))
     browser_fallback: bool = field(default_factory=lambda: env_bool("BROWSER_FALLBACK_ENABLED", True))
     browser_timeout_seconds: int = field(default_factory=lambda: env_int("BROWSER_TIMEOUT_SECONDS", 25, 10, 60))
@@ -202,40 +201,50 @@ class Config:
         return issues
 
 
+FAST_INTERVAL_SECONDS = 300   # stores with no observed blocking so far
+SLOW_INTERVAL_SECONDS = 900   # stores that have actually hit HTTP 403 in practice
+
 STORES: tuple[StoreConfig, ...] = (
     StoreConfig(
         "Newegg",
         "https://www.newegg.com/p/pl?d={query}",
         ("newegg.com", "www.newegg.com"),
+        FAST_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "Best Buy page",
         "https://www.bestbuy.com/site/searchpage.jsp?st={query}",
         ("bestbuy.com", "www.bestbuy.com"),
+        FAST_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "B&H",
         "https://www.bhphotovideo.com/c/search?q={query}&sts=ma",
         ("bhphotovideo.com", "www.bhphotovideo.com"),
+        FAST_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "Micro Center",
         "https://www.microcenter.com/search/search_results.aspx?Ntt={query}",
         ("microcenter.com", "www.microcenter.com"),
+        SLOW_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "Adorama",
         "https://www.adorama.com/l/?searchinfo={query}",
         ("adorama.com", "www.adorama.com"),
+        SLOW_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "Central Computers",
         "https://www.centralcomputer.com/catalogsearch/result/?q={query}",
         ("centralcomputer.com", "www.centralcomputer.com"),
+        FAST_INTERVAL_SECONDS,
     ),
     StoreConfig(
         "Antonline",
         "https://www.antonline.com/Search?q={query}",
         ("antonline.com", "www.antonline.com", "node-4.antonline.com"),
+        SLOW_INTERVAL_SECONDS,
     ),
 )
