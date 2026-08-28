@@ -42,3 +42,42 @@ V6 never pretends current eBay asking prices are sold prices. General access to 
 No software can guarantee that retailers will not block automated requests. V6 uses official APIs where available, slow store-search intervals, low per-store concurrency, jitter, and long backoff. Playwright is a rendering fallback—not a CAPTCHA or anti-bot bypass. A challenged store is paused while all other lanes continue.
 
 Run tests with `python -m pytest -q`. The included regression suite covers both false eBay DDR5 alerts that appeared in V5.1.
+
+## Trading alert bot (`tradingbot/`)
+
+A separate, alerts-only watcher for crypto, memecoins, and stocks — it never places
+orders, it only tells you when something moves. It lives next to the dealbot and does
+not touch any dealbot files. Run it with:
+
+```
+python trading_app.py
+```
+
+It reads public, keyless market data:
+
+- **Crypto** via [ccxt](https://github.com/ccxt/ccxt) (100+ exchanges unified; defaults to Kraken's public ticker API).
+- **Stocks** via `yfinance` (Yahoo Finance).
+- **Memecoins / DEX tokens** via the [Dexscreener](https://docs.dexscreener.com/api/reference) public API.
+
+Configure it with the same root `.env` file, all optional (sensible defaults apply):
+
+```
+TRADING_DISCORD_WEBHOOK_URL=          # Discord webhook URL; if unset, alerts just print to the console
+CRYPTO_EXCHANGE=kraken                # any ccxt exchange id
+CRYPTO_SYMBOLS=BTC/USD,ETH/USD,SOL/USD
+CRYPTO_MOVE_PERCENT=3
+CRYPTO_INTERVAL_SECONDS=60
+STOCK_SYMBOLS=AAPL,TSLA,NVDA
+STOCK_MOVE_PERCENT=3
+STOCK_INTERVAL_SECONDS=300
+MEMECOIN_ADDRESSES=                   # comma-separated chain:tokenAddress, e.g. solana:So11111111111111111111111111111111111111112
+MEMECOIN_MOVE_PERCENT=8
+MEMECOIN_INTERVAL_SECONDS=60
+```
+
+Each watcher polls its symbols on its own interval and fires an alert when a symbol
+moves by at least its configured percent since the last check. To create a Discord
+webhook URL: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.
+
+This is a starting point, not financial advice — verify any signal yourself before
+trading on it.

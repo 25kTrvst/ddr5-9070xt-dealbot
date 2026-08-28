@@ -8,3 +8,5 @@ feedparser>=6,<7
 playwright>=1.47,<2
 pytest>=8,<10
 pytest-asyncio>=0.24,<1
+ccxt>=4,<5
+yfinance>=0.2,<1
